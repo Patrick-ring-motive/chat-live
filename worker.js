@@ -453,7 +453,7 @@ function toolData(value, param, wrapArguments = false) {
   function copy(value, depth) {
     if (typeof value === "number" && !Number.isFinite(value)) return null;
     if (value === null || typeof value !== "object") return value;
-    if (Array.isArray(value)) return value.map(child => copy(child, depth + 1));
+    if (isArray(value)) return value.map(child => copy(child, depth + 1));
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copy(child, depth + 1)]));
   }
   return copy(value, 0);
@@ -477,25 +477,21 @@ function argumentsObject(value) {
 }
 
 export function translate(body) {
-  if (!body || typeof body !== "object" || Array.isArray(body)) invalid("Expected a JSON object.");
+  body = Object(body);
   bodyDepth(body);
   const model = typeof body.model === "string" ? body.model.trim().replace(/^models\//, "") || MODEL : MODEL;
-  if (body.stream != null && ![false, 0, "false"].includes(body.stream)) invalid("Only stream:false is supported.", "stream");
-  // One completion is always returned; extra provider/request options are ignored.
-  if (!Array.isArray(body.messages) || !body.messages.length) invalid("messages must be a nonempty array.", "messages");
+  body.messages = toArr(body.messages ?? body);
   const declarations = [];
   const names = new Set();
   if (body.tools != null) {
-    if (!Array.isArray(body.tools)) invalid("tools must be an array or null.", "tools");
+    body.tools = toArr(body.tools);
     for (const tool of body.tools) {
-      if (!object(tool) || (tool.type != null && tool.type !== "function") || !object(tool.function)) invalid("Only function tools are supported.", "tools");
       const fn = tool.function;
-      if (!functionName(fn.name) || names.has(fn.name)) invalid("Missing or duplicate function name.", "tools");
       const parametersJsonSchema = parametersSchema(fn.parameters);
       names.add(fn.name);
       declarations.push({
         name: fn.name,
-        ...(typeof fn.description === "string" ? {
+        ...(isString(fn.description) ? {
           description: fn.description
         } : {}),
         parametersJsonSchema,
@@ -508,7 +504,9 @@ export function translate(body) {
   const ids = new Set();
   const pending = new Map();
   for (const message of body.messages) {
-    if (!message || !["system", "developer", "user", "assistant", "tool"].includes(message.role)) invalid("Unsupported message role.", "messages");
+    if (!message || !["system", "developer", "user", "assistant", "tool"].includes(message.role)){
+      message.role = 'user';
+    }
     if (message.function_call != null) invalid("Legacy function_call history is not supported; use tool_calls.", "messages");
     if (message.audio != null) invalid("Audio message content is not supported.", "messages");
     if (message.tool_calls != null && (!Array.isArray(message.tool_calls) || (message.role !== "assistant" && message.tool_calls.length))) {
