@@ -1,3 +1,364 @@
+const instanceOf = (value, constructor) => {
+  try {
+    return value instanceof constructor;
+  } catch {
+    return false;
+  }
+};
+
+const isString = (value) =>
+  typeof value === 'string' || instanceOf(value, String);
+
+const isArray = (value) => {
+  try {
+    return Array.isArray(value) || instanceOf(value, Array);
+  } catch {
+    return false;
+  }
+}
+
+const isObject = value => typeof value === 'object' && value !== null;
+
+const stringify = (value) => {
+  try {
+    if (isString(value)) return String(value);
+    return String(JSON.stringify(value));
+  } catch {
+    try {
+      return String(value);
+    } catch (e) {
+      try {
+        return String(e);
+      } catch {
+        return '';
+      }
+    }
+  }
+};
+
+function parseTruncatedJSON(text) {
+  text = stringify(text);
+
+  const backslash = String.fromCharCode(92);
+  const stack = [];
+  let index = 0;
+  let result;
+  let hasRoot = false;
+
+  function isWhitespace(char) {
+    const code = char?.charCodeAt(0);
+    return code === 32 || code === 9 || code === 13 || code === 10;
+  }
+
+  let contentEnd = text.length;
+  while (contentEnd > 0 && isWhitespace(text[contentEnd - 1])) contentEnd--;
+  if (text.endsWith("...", contentEnd)) {
+    text = text.slice(0, contentEnd - 3);
+  }
+
+  function skipWhitespace() {
+    while (index < text.length && isWhitespace(text[index])) {
+      index++;
+    }
+  }
+
+  function readString() {
+    index++; // Opening quote.
+    const chars = [];
+    const escapes = {
+      '"': '"',
+      [backslash]: backslash,
+      "/": "/",
+      b: String.fromCharCode(8),
+      f: String.fromCharCode(12),
+      n: String.fromCharCode(10),
+      r: String.fromCharCode(13),
+      t: String.fromCharCode(9),
+    };
+    while (index < text.length) {
+      const char = text[index++];
+      if (char === '"') return {
+        value: chars.join(""),
+        complete: true
+      };
+      if (char !== backslash) {
+        chars.push(char.charCodeAt(0) < 0x20 ? String.fromCharCode(char.charCodeAt(0)) : char);
+        continue;
+      }
+      if (index === text.length) {
+        chars.push(backslash);
+        break;
+      }
+      const escape = text[index++];
+      if (escape === "u") {
+        let hex = "";
+        for (let digit = 0; digit < 4; digit++) {
+          if (index === text.length) {
+            chars.push(backslash + "u" + hex);
+            return {
+              value: chars.join(""),
+              complete: false
+            };
+          }
+          if (!/[0-9a-fA-F]/.test(text[index])) break;
+          hex += text[index++];
+        }
+        chars.push(String.fromCharCode(parseInt(hex.padStart(4, '0'), 16)));
+      } else if (Object.hasOwn(escapes, escape)) {
+        chars.push(escapes[escape]);
+      } else {
+        chars.push(backslash + escape);
+      }
+    }
+    return {
+      value: chars.join(""),
+      complete: false
+    };
+  }
+
+  function readToken() {
+    const start = index;
+    while (index < text.length && !isWhitespace(text[index]) && !'{}[],:"'.includes(text[index])) {
+      index++;
+    }
+    return text.slice(start, index);
+  }
+
+  function readScalar() {
+    if (text[index] === '"') return readString().value;
+    const token = readToken();
+    if (token[0] === 't') return true;
+    if (token[0] === 'f') return false;
+    if (token[0] === 'n') return null;
+    if (token === '-') return null;
+    const number = parseFloat(token);
+    return Number.isNaN(number) ? token : number;
+  }
+
+  function attach(value) {
+    const parent = stack[stack.length - 1];
+    if (!parent) {
+      result = value;
+      hasRoot = true;
+    } else if (parent.kind === "array") {
+      parent.value.push(value);
+      parent.state = "separator";
+    } else {
+      // Assignment would invoke the inherited __proto__ setter.
+      Object.defineProperty(parent.value, parent.key, {
+        value,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      parent.state = "separator";
+    }
+  }
+
+  while (true) {
+    skipWhitespace();
+    let frame = stack[stack.length - 1];
+    if (index === text.length) {
+      if (frame?.kind === "object" && (frame.state === "colon" || frame.state === "value")) {
+        attach(null);
+      }
+      return result;
+    }
+    const char = text[index];
+
+    // Either closer ends the current frame. Unmatched closers are ignored.
+    if (char === ']' || char === '}') {
+      if (frame?.kind === 'object' && (frame.state === 'colon' || frame.state === 'value')) {
+        attach(null);
+      }
+      stack.pop();
+      index++;
+      continue;
+    }
+
+    if (!frame && hasRoot && char !== ',' && char !== ':') {
+      if (result === null || typeof result !== 'object') result = [result];
+      frame = {
+        kind: isArray(result) ? 'array' : 'object',
+        value: result,
+        state: 'separator'
+      };
+      stack.push(frame);
+    }
+
+    if (char === ',') {
+      if (frame?.kind === 'object' && (frame.state === 'colon' || frame.state === 'value')) {
+        attach(null);
+      } else if (frame?.kind === 'array' && (frame.state === 'first' || frame.state === 'value')) {
+        attach(null);
+      }
+      if (frame) frame.state = frame.kind === 'array' ? 'value' : 'key';
+      index++;
+      continue;
+    }
+    if (char === ':') {
+      if (frame?.state === 'colon') frame.state = 'value';
+      index++;
+      continue;
+    }
+
+    if (frame) {
+      if (frame.state === 'separator') frame.state = frame.kind === 'array' ? 'value' : 'key';
+      if (frame.kind === 'object' && (frame.state === 'first' || frame.state === 'key')) {
+        // Structural openers in a key slot are literal one-character keys.
+        frame.key = char === '"' ? readString().value :
+          char === '{' || char === '[' ? text[index++] : readToken();
+        frame.state = 'colon';
+        continue;
+      }
+      if (frame.state === 'colon') frame.state = 'value';
+    }
+
+    if (char === "{" || char === "[") {
+      const value = char === "{" ? {} : [];
+      attach(value);
+      stack.push({
+        kind: char === "{" ? "object" : "array",
+        value,
+        state: "first"
+      });
+      index++;
+    } else {
+      attach(readScalar());
+    }
+  }
+}
+
+const Q = fn => {
+  try {
+    return fn();
+  } catch {}
+};
+
+const encoder = new TextEncoder();
+const encode = encoder.encode.bind(encoder);
+
+const safeStatusText = (value) =>
+  Q(() => {
+    const bytes = encode(String(value)).slice(0, 200);
+    const latin1 = String.fromCharCode(...bytes);
+    const flat = JSON.stringify(latin1.replaceAll(/\s+/g, " "));
+    return flat.replaceAll(String.fromCharCode(127), "DEL");
+  }) ?? "";
+
+const isNullish = x => x === null || x === undefined;
+
+async function bestEffortResponse(response) {
+  try {
+    const originalResponse = response;
+    if (!originalResponse.body) {
+      return originalResponse;
+    }
+    const originalReader = Q(() => originalResponse.body.getReader());
+    const resilientStream = new ReadableStream({
+      async pull(controller) {
+        try {
+          const {
+            done,
+            value
+          } = await originalReader.read();
+
+          if (done == true || (isNullish(done) && isNullish(value))) {
+            Q(() => controller.close());
+          } else {
+            controller.enqueue(value);
+          }
+        } catch (streamError) {
+          // A mid-stream network drop or timeout caught here!
+          console.warn(
+            "Stream interrupted prematurely. Closing stream gracefully with partial data.",
+            streamError,
+          );
+
+          Q(() => controller?.close?.()?.catch?.(() => {}));
+        }
+      },
+      cancel(reason) {
+        Q(() => originalReader?.cancel?.(reason)?.catch?.(() => {}));
+      },
+    });
+    return new Response(resilientStream, {
+      status: originalResponse.status,
+      statusText: originalResponse.statusText,
+      headers: originalResponse.headers,
+    });
+  } catch (e) {
+    return new Response(String(e), {
+      status: 500,
+      statusText: safeStatusText(e)
+    });
+  }
+}
+
+async function bestEffortFetch(input, init) {
+  try {
+    const originalResponse = await fetch(input, init);
+    return await bestEffortResponse(originalResponse);
+  } catch (e) {
+    return new Response(String(e), {
+      status: 500,
+      statusText: safeStatusText(e)
+    });
+  }
+}
+
+async function $bytes(res) {
+  const chunks = [];
+  let reader;
+  try {
+    reader = res?.body?.getReader?.();
+    if (reader) {
+      while (true) {
+        const {
+          done,
+          value
+        } = await reader.read();
+        if (done == true || (isNullish(done) && isNullish(value))) {
+          break;
+        }
+        chunks.push(value);
+      }
+    }
+  } catch (e) {
+    return encode(String(e));
+  } finally {
+    Q(() => reader?.releaseLock?.()?.catch?.(() => {}));
+  }
+  return new Uint8Array(await new Blob(chunks).arrayBuffer());
+}
+
+const decoder = new TextDecoder();
+const decode = decoder.decode.bind(decoder);
+
+async function $text(res) {
+  try {
+    if (!res.body) {
+      return res.statusText || '';
+    }
+    return decode(await $bytes(res));
+  } catch (e) {
+    return String(e);
+  }
+}
+
+const fetchResponse = async (...args) => {
+  try {
+    return await bestEffortFetch(...args);
+  } catch (e) {
+    return new Response(String(e), {
+      status: 500,
+      statusText: safeStatusText(e)
+    });
+  }
+};
+
+
+
 // Stateless Chat Completions -> Gemini Live bridge. One session per request.
 const ENDPOINT = "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const MODEL = "gemini-3.8-live";
