@@ -610,7 +610,7 @@ export function translate(body) {
   };
 }
 
-export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, fetchImpl = globalThis.fetch.bind(globalThis)) {
+export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, fetchImpl = fetchResponse) {
   const controller = new AbortController();
   let socket;
   let timer;
