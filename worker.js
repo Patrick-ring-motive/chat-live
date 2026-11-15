@@ -422,28 +422,23 @@ function bodyDepth(value) {
 
 function textParts(content) {
   if (content == null) return [];
-  if (typeof content === "string") return [{
+  if (isString(content)) return [{
     text: content
   }];
-  if (Array.isArray(content) && content.every(part => object(part) &&
-      (part.type == null || part.type === "text") && typeof part.text === "string")) {
-    return content.map(part => ({
-      text: part.text
+    return toArr(content).map(part => ({
+      text: stringify(part?.text ?? part)
     }));
-  }
-  invalid("Only string or text-part content is supported.", "messages");
 }
 
 function numeric(value) {
-  if (typeof value !== "number" && !(typeof value === "string" && value.trim())) return undefined;
-  const number = Number(value);
+  const number = parseFloat(value) || undefined;
   return Number.isFinite(number) ? number : undefined;
 }
 
 // Bound and copy all tool data, including unknown schema keywords and defaults.
 // No mutation, evaluation, reference resolution, or instance validation.
 function toolData(value, param, wrapArguments = false) {
-  if (typeof value === "string") {
+  if (isString(value)) {
     try {
       value = JSON.parse(value);
     } catch {
@@ -456,8 +451,6 @@ function toolData(value, param, wrapArguments = false) {
   let count = 0;
 
   function copy(value, depth) {
-    if (++count > 4096 || depth > 32) invalid("Function data is too complex.", param);
-    // JSON serialization in the sibling maps nonfinite numeric values to null.
     if (typeof value === "number" && !Number.isFinite(value)) return null;
     if (value === null || typeof value !== "object") return value;
     if (Array.isArray(value)) return value.map(child => copy(child, depth + 1));
