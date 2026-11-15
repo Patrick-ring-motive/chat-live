@@ -332,7 +332,8 @@ export function translate(body) {
         try {
           result = JSON.parse(result);
         } catch {
-          /* Plain text result. */ }
+          /* Plain text result. */
+        }
       }
       result = toolData({
         result
@@ -503,8 +504,7 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
               socket.send(JSON.stringify({
                 realtimeInput: {
                   text: toolResults ?
-                    "Continue from the supplied tool results and answer the preceding request." :
-                    last.parts.map(part => part.text).join("\n")
+                    "Continue from the supplied tool results and answer the preceding request." : last.parts.map(part => part.text).join("\n")
                 }
               }));
             } else {
@@ -592,7 +592,8 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
       try {
         socket.close(1000, "Request finished");
       } catch {
-        /* Already closed. */ }
+        /* Already closed. */
+      }
     }
   }
 }
