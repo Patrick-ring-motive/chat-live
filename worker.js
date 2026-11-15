@@ -387,37 +387,21 @@ function geminiKey(request) {
   return String(token);
 }
 
-async function readJson(request) {
-  if (!request.body) invalid("Request body is required.");
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder("utf-8", {
-    fatal: true
-  });
-  let size = 0;
-  let text = "";
-  try {
-    while (true) {
-      const {
-        done,
-        value
-      } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_BODY) throw new ApiError(413, "Request exceeds 1 MiB.");
-      text += decoder.decode(value, {
-        stream: true
-      });
-    }
-    text += decoder.decode();
-    return JSON.parse(text);
-  } catch (error) {
-    await reader.cancel().catch(() => {});
-    if (error instanceof ApiError) throw error;
-    invalid("Body must contain valid UTF-8 JSON.");
-  } finally {
-    reader.releaseLock();
-  }
+async function readJson(message) {
+  const text = await $text(message);
+  return parseTruncatedJSON(text);
 }
+
+const toArr = arr => {
+  if (!isArray(arr)) {
+    if (arr?.[Symbol.iterator]) {
+      arr = [...arr].map(Object);
+    } else {
+      arr = [Object(arr)];
+    }
+  }
+  return arr;
+};
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const functionName = value => typeof value === "string" && value.trim().length > 0;
@@ -454,153 +438,6 @@ function numeric(value) {
   if (typeof value !== "number" && !(typeof value === "string" && value.trim())) return undefined;
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
-}
-// Adapted from chat-interactions/worker.js parseTruncatedJSON. Only tool data
-// uses recovery; request bodies and WebSocket envelopes still require valid JSON.
-function parseTruncatedJSON(text, param) {
-  const stack = [];
-  let index = 0;
-  let result;
-  let hasRoot = false;
-  let count = 0;
-  const whitespace = char => char !== undefined && " \t\r\n".includes(char);
-  let contentEnd = text.length;
-  while (contentEnd > 0 && whitespace(text[contentEnd - 1])) contentEnd--;
-  if (text.endsWith("...", contentEnd)) text = text.slice(0, contentEnd - 3);
-
-  function readString() {
-    index++;
-    const chars = [];
-    const escapes = {
-      '"': '"',
-      "\\": "\\",
-      "/": "/",
-      b: "\b",
-      f: "\f",
-      n: "\n",
-      r: "\r",
-      t: "\t"
-    };
-    while (index < text.length) {
-      const char = text[index++];
-      if (char === '"') break;
-      if (char !== "\\") {
-        chars.push(char);
-        continue;
-      }
-      if (index === text.length) {
-        chars.push("\\");
-        break;
-      }
-      const escape = text[index++];
-      if (escape === "u") {
-        let hex = "";
-        for (let digit = 0; digit < 4; digit++) {
-          if (index === text.length) {
-            chars.push("\\u" + hex);
-            return chars.join("");
-          }
-          if (!/[0-9a-fA-F]/.test(text[index])) break;
-          hex += text[index++];
-        }
-        chars.push(String.fromCharCode(parseInt(hex.padStart(4, "0"), 16)));
-      } else chars.push(Object.hasOwn(escapes, escape) ? escapes[escape] : "\\" + escape);
-    }
-    return chars.join("");
-  }
-
-  function readToken() {
-    const start = index;
-    while (index < text.length && !whitespace(text[index]) && !'{}[],:"'.includes(text[index])) index++;
-    return text.slice(start, index);
-  }
-
-  function readScalar() {
-    if (text[index] === '"') return readString();
-    const token = readToken();
-    if (token[0] === "t") return true;
-    if (token[0] === "f") return false;
-    if (token[0] === "n" || token === "-") return null;
-    const number = parseFloat(token);
-    return Number.isNaN(number) ? token : number;
-  }
-
-  function attach(value) {
-    if (++count > 4096) invalid("Function data is too complex.", param);
-    const parent = stack.at(-1);
-    if (!parent) {
-      result = value;
-      hasRoot = true;
-    } else if (parent.kind === "array") {
-      parent.value.push(value);
-      parent.state = "separator";
-    } else {
-      // Preserve prototype-named keys as own data, never invoke setters.
-      Object.defineProperty(parent.value, parent.key, {
-        value,
-        enumerable: true,
-        configurable: true,
-        writable: true
-      });
-      parent.state = "separator";
-    }
-  }
-  while (true) {
-    if (stack.length > 33) invalid("Function data is too complex.", param);
-    while (whitespace(text[index])) index++;
-    let frame = stack.at(-1);
-    if (index === text.length) {
-      if (frame?.kind === "object" && ["colon", "value"].includes(frame.state)) attach(null);
-      return result;
-    }
-    const char = text[index];
-    if (char === "]" || char === "}") {
-      if (frame?.kind === "object" && ["colon", "value"].includes(frame.state)) attach(null);
-      stack.pop();
-      index++;
-      continue;
-    }
-    if (!frame && hasRoot && char !== "," && char !== ":") {
-      if (result === null || typeof result !== "object") result = [result];
-      frame = {
-        kind: Array.isArray(result) ? "array" : "object",
-        value: result,
-        state: "separator"
-      };
-      stack.push(frame);
-    }
-    if (char === ",") {
-      if (frame?.kind === "object" && ["colon", "value"].includes(frame.state)) attach(null);
-      else if (frame?.kind === "array" && ["first", "value"].includes(frame.state)) attach(null);
-      if (frame) frame.state = frame.kind === "array" ? "value" : "key";
-      index++;
-      continue;
-    }
-    if (char === ":") {
-      if (frame?.state === "colon") frame.state = "value";
-      index++;
-      continue;
-    }
-    if (frame) {
-      if (frame.state === "separator") frame.state = frame.kind === "array" ? "value" : "key";
-      if (frame.kind === "object" && ["first", "key"].includes(frame.state)) {
-        frame.key = char === '"' ? readString() : char === "{" || char === "[" ? text[index++] : readToken();
-        frame.state = "colon";
-        continue;
-      }
-      if (frame.state === "colon") frame.state = "value";
-    }
-    if (char === "{" || char === "[") {
-      const value = char === "{" ? {} : [];
-      attach(value);
-      stack.push({
-        kind: char === "{" ? "object" : "array",
-        value,
-        state: "first"
-      });
-      index++;
-    } else attach(readScalar());
-  }
 }
 
 // Bound and copy all tool data, including unknown schema keywords and defaults.
