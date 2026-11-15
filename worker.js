@@ -357,8 +357,6 @@ const fetchResponse = async (...args) => {
   }
 };
 
-
-
 // Stateless Chat Completions -> Gemini Live bridge. One session per request.
 const ENDPOINT = "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const MODEL = "gemini-3.8-live";
@@ -425,9 +423,9 @@ function textParts(content) {
   if (isString(content)) return [{
     text: content
   }];
-    return toArr(content).map(part => ({
-      text: stringify(part?.text ?? part)
-    }));
+  return toArr(content).map(part => ({
+    text: stringify(part?.text ?? part)
+  }));
 }
 
 function numeric(value) {
@@ -504,7 +502,7 @@ export function translate(body) {
   const ids = new Set();
   const pending = new Map();
   for (const message of body.messages) {
-    if (!message || !["system", "developer", "user", "assistant", "tool"].includes(message.role)){
+    if (!message || !["system", "developer", "user", "assistant", "tool"].includes(message.role)) {
       message.role = 'user';
     }
     if (message.function_call != null) invalid("Legacy function_call history is not supported; use tool_calls.", "messages");
