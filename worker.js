@@ -22,15 +22,11 @@ const json = (value, status = 200) => Response.json(value, {
 });
 
 function geminiKey(request) {
-  const token = /^Bearer[ \t]+([^\s]+)$/i.exec(request.headers.get("Authorization") || "")?.[1];
-  if (!token) throw new ApiError(401, "Authorization: Bearer <Gemini API key> is required.");
-  return token;
+  const token = /^Bearer[ \t]+([^\s]+)$/i.exec(request?.headers?.get?.("Authorization") || "")?.[1];
+  return String(token);
 }
 
 async function readJson(request) {
-  if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json") {
-    throw new ApiError(415, "Content-Type must be application/json.");
-  }
   if (!request.body) invalid("Request body is required.");
   const reader = request.body.getReader();
   const decoder = new TextDecoder("utf-8", {
