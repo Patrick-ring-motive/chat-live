@@ -392,8 +392,8 @@ async function readJson(message) {
 
 const toArr = arr => {
   if (!isArray(arr)) {
-    if(isString(arr)){
-      return [Object.assign(Object(arr),parseTruncatedJSON(arr))];
+    if (isString(arr)) {
+      return [Object.assign(Object(arr), parseTruncatedJSON(arr))];
     }
     if (arr?.[Symbol.iterator]) {
       arr = [...arr].map(Object);
