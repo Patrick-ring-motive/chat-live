@@ -429,7 +429,7 @@ function textParts(content) {
 }
 
 function numeric(value) {
-  const number = parseFloat(value) || undefined;
+  const number = parseFloat(value);
   return Number.isFinite(number) ? number : undefined;
 }
 
