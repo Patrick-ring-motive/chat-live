@@ -392,6 +392,9 @@ async function readJson(message) {
 
 const toArr = arr => {
   if (!isArray(arr)) {
+    if(isString(arr)){
+      return [Object.assign(Object(arr),parseTruncatedJSON(arr))];
+    }
     if (arr?.[Symbol.iterator]) {
       arr = [...arr].map(Object);
     } else {
@@ -401,8 +404,8 @@ const toArr = arr => {
   return arr;
 };
 
-const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
-const functionName = value => typeof value === "string" && value.trim().length > 0;
+const object = value => value !== null && typeof value === "object" && !isArray(value);
+const functionName = value => isString(value) && value.trim().length > 0;
 const callId = functionName;
 // Bound even ignored metadata without recursion or forwarding it upstream.
 function bodyDepth(value) {
