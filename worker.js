@@ -1,3 +1,66 @@
+import * as util from 'node:util';
+
+const overwrite = (obj, prop, val)=> {
+  Object.defineProperty(obj, prop, {
+    value: val,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+  return obj;
+};
+
+const assign = (object,key,value) =>{
+  try{
+    object[key] = value;
+  }catch{
+    try{
+      overwrite(object, key, value);
+    }catch{}
+  }
+  return object;
+};
+
+const assignAll = (target,...srcs)=>{
+  for(const src of srcs) {
+    for (const key in src) {
+      assign(target, key, src[key]);
+    }
+    for(const key of Reflect.ownKeys(src)) {
+      assign(target, key, src[key]);
+    }
+  }
+  return target;
+}
+
+const flattenObject = req => {
+  req = Object(req);
+  const obj = {};
+  for (const key in req) {
+    if (typeof req[key] !== 'function') {
+      obj[key] = req[key];
+    }
+  }
+  for (const key of Reflect.ownKeys(req)) {
+    if (typeof req[key] !== 'function') {
+      obj[String(key)] = req[key];
+    }
+  }
+  return obj;
+};
+
+const flattenRequest = req => {
+  return {
+    ...flattenObject(req),
+    ...Object.fromEntries(req.headers.entries()),
+    ...Object.fromEntries(new URL(req.url).searchParams.entries()),
+  };
+};
+
+const flattenArray = arr => {
+  return assignAll({}, arr, ...arr.map(flattenObject));
+};
+
 const instanceOf = (value, constructor) => {
   try {
     return value instanceof constructor;
@@ -19,6 +82,14 @@ const isArray = (value) => {
 
 const isObject = value => typeof value === 'object' && value !== null;
 
+const randId = () => {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return String(Math.random()).replace('0.', '');
+  }
+};
+
 const stringify = (value) => {
   try {
     if (isString(value)) return String(value);
@@ -26,11 +97,15 @@ const stringify = (value) => {
   } catch {
     try {
       return String(value);
-    } catch (e) {
+    } catch {
       try {
-        return String(e);
-      } catch {
-        return '';
+        return String(util.inspect(value));
+      } catch (e) {
+        try {
+          return String(e);
+        } catch {
+          return '';
+        }
       }
     }
   }
@@ -347,6 +422,51 @@ async function $text(res) {
   }
 }
 
+
+const toObj = obj => {
+  if (isString(obj)) {
+    obj = assignAll(Object(obj), Object(parseTruncatedJSON(obj)));
+  }
+  if (isArray(obj)) {
+    return flattenArray(obj);
+  }
+  return Object(obj);
+}
+
+const toArr = arr => {
+  if (!isArray(arr)) {
+    if (isString(arr)) {
+      return [assignAll(Object(arr), parseTruncatedJSON(arr))];
+    }
+    if (arr?.[Symbol.iterator]) {
+      arr = [...arr].map(Object);
+    } else {
+      arr = [Object(arr)];
+    }
+  }
+  return arr;
+};
+
+
+const tryB64 = str => {
+  try {
+    str = str.replace(/=+$/, '').replaceAll('-', '+').replaceAll('_', '/');
+    return Uint8Array.from(atob(str.padEnd(Math.ceil(str.length / 4) * 4, '=')), char => char.charCodeAt(0));
+  } catch {
+    return encode(str);
+  }
+};
+
+const concat = parts => {
+  const outputs = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+  let output = 0;
+  for (const part of parts) outputs.set(part, output), output += part.length;
+  return outputs;
+};
+
+const base64ToBytes = x => instanceOf(x, Uint8Array) ? x :
+  concat(stringify(x).split(/([\w+/=-]{4,})/).map((s, i) => i % 2 ? tryB64(s) : encode(s)));
+
 const fetchResponse = async (...args) => {
   try {
     return await bestEffortFetch(...args);
@@ -391,19 +511,6 @@ async function readJson(message) {
   return parseTruncatedJSON(text);
 }
 
-const toArr = arr => {
-  if (!isArray(arr)) {
-    if (isString(arr)) {
-      return [Object.assign(Object(arr), parseTruncatedJSON(arr))];
-    }
-    if (arr?.[Symbol.iterator]) {
-      arr = [...arr].map(Object);
-    } else {
-      arr = [Object(arr)];
-    }
-  }
-  return arr;
-};
 
 const object = value => value !== null && typeof value === "object" && !isArray(value);
 const functionName = value => isString(value) && value.trim().length > 0;
@@ -415,9 +522,10 @@ function bodyDepth(value) {
   ];
   while (stack.length) {
     const [node, depth] = stack.pop();
-    if (depth > 128) invalid("Request is too complex: nesting exceeds 128 levels.");
     if (node && typeof node === "object") {
-      for (const child of Object.values(node)) stack.push([child, depth + 1]);
+      for (const child of Object.values(node)) {
+        stack.push([child, depth + 1]);
+      }
     }
   }
 }
@@ -481,7 +589,7 @@ function argumentsObject(value) {
 export function translate(body) {
   body = Object(body);
   bodyDepth(body);
-  const model = typeof body.model === "string" ? body.model.trim().replace(/^models\//, "") || MODEL : MODEL;
+  const model = isString(body.model) ? body.model.trim().replace(/^models\//, "") || MODEL : MODEL;
   body.messages = toArr(body.messages ?? body);
   const declarations = [];
   const names = new Set();
@@ -505,26 +613,54 @@ export function translate(body) {
   const instructions = [];
   const ids = new Set();
   const pending = new Map();
-  for (const message of body.messages) {
-    if (!message || !["system", "developer", "user", "assistant", "tool"].includes(message.role)) {
+  const pendingAsText = () => {
+    for (const turn of turns) {
+      turn.parts = turn.parts.map(part => part.functionCall && pending.has(part.functionCall.id)
+        ? { text: `tool_call:${stringify(part.functionCall)}` } : part);
+    }
+    pending.clear();
+  };
+  for (const originalMessage of toArr(body.messages ?? body ?? [])) {
+    const message = { ...originalMessage };
+    if (message.function_call != null) {
+      if (!message.tool_calls?.length) {
+        message.tool_calls = [{
+          id: `call_${randId()}`,
+          type: "function",
+          function: message.function_call
+        }];
+      }
+      message.role = "assistant";
+      delete message.function_call;
+    }
+    if (message.role === "function") {
+      message.role = "tool";
+    }
+    if (!["system", "developer", "user", "assistant", "tool"].includes(message.role)) {
       message.role = 'user';
     }
-    if (message.function_call != null) invalid("Legacy function_call history is not supported; use tool_calls.", "messages");
-    if (message.audio != null) invalid("Audio message content is not supported.", "messages");
-    if (message.tool_calls != null && (!Array.isArray(message.tool_calls) || (message.role !== "assistant" && message.tool_calls.length))) {
-      invalid("tool_calls must be an assistant call array.", "messages");
+    if (message.audio != null) {
+      message.content = [...textParts(message.content), { text: `audio:${stringify(message.audio)}` }]
+        .map(part => part.text).join("\n");
+      delete message.audio;
+    }
+    if (message.tool_calls != null) {
+      message.tool_calls = toArr(message.tool_calls);
     }
     if (message.role === "tool") {
+      if (!callId(message.tool_call_id)) {
+        const matches = [...pending].filter(([, name]) => !functionName(message.name) || name === message.name);
+        if (matches.length === 1) message.tool_call_id = matches[0][0];
+      }
       const name = pending.get(message.tool_call_id);
-      if (!name) invalid("Tool result must match a pending call ID.", "messages");
-      // ID is authoritative; optional provider name metadata cannot reroute it.
+      if (!name) {
+        turns.push({ role: "user", parts: [{ text: `tool_result:${stringify(message)}` }] });
+        continue;
+      }
+      // A known ID supplies the name; never guess a match for an orphaned ID.
       let result = message.content ?? null;
-      if (typeof result === "string") {
-        try {
-          result = JSON.parse(result);
-        } catch {
-          /* Plain text result. */
-        }
+      if (isString(result)) {
+        result = parseTruncatedJSON(result);
       }
       result = toolData({
         result
@@ -546,12 +682,13 @@ export function translate(body) {
       pending.delete(message.tool_call_id);
       continue;
     }
-    if (pending.size) invalid("All tool calls need results before the next message.", "messages");
+    if (pending.size) pendingAsText();
     const parts = textParts(message.content);
     for (const call of message.tool_calls ?? []) {
       if (!object(call) || (call.type != null && call.type !== "function") || !object(call.function) ||
         !callId(call.id) || ids.has(call.id) || !functionName(call.function.name)) {
-        invalid("Function calls need unique nonempty string IDs and names.", "messages");
+        parts.push({ text: `tool_call:${stringify(call)}` });
+        continue;
       }
       ids.add(call.id);
       pending.set(call.id, call.function.name);
@@ -570,7 +707,7 @@ export function translate(body) {
       parts
     });
   }
-  if (pending.size) invalid("All tool calls need client results.", "messages");
+  if (pending.size) pendingAsText();
   // Empty/instruction-only input and assistant-ended history need an explicit trigger.
   if (turns.at(-1)?.role !== "user") turns.push({
     role: "user",
@@ -617,13 +754,24 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
   let socket;
   let timer;
   let onAbort;
-  let rejectPending;
-  const cancelled = new Promise((_, reject) => {
-    rejectPending = reject;
+  let text = "";
+  let usage;
+  let availableText = "";
+  const partialResult = error => ({
+    text: text.trim() ? text : availableText.trim() ? availableText : `error:${stringify(error instanceof Error ? String(error) : error)}`,
+    usage,
+    status: error instanceof ApiError ? error.status : 502,
+    finishReason: "stop"
+  });
+  let resolvePending;
+  const cancelled = new Promise(resolve => {
+    resolvePending = resolve;
   });
   const abort = error => {
+    const result = partialResult(error);
+    if (text.trim() || availableText.trim()) result.status = 200;
+    resolvePending(result);
     controller.abort();
-    rejectPending(error);
   };
   onAbort = () => abort(new ApiError(499, "Client disconnected."));
   signal.addEventListener("abort", onAbort, {
@@ -631,13 +779,11 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
   });
   timer = setTimeout(() => abort(new ApiError(504, "Gemini Live request timed out.")), timeoutMs);
   const work = async () => {
-    if (signal.aborted) throw new ApiError(499, "Client disconnected.");
     const response = await fetchImpl(ENDPOINT, {
       headers: {
         Upgrade: "websocket",
         "x-goog-api-key": apiKey
       },
-      redirect: "manual",
       signal: controller.signal,
     });
     socket = response.webSocket;
@@ -646,40 +792,43 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
         socket.accept();
         socket.close(1000, "Cancelled");
       }
-      throw new ApiError(504, "Gemini Live request cancelled.");
     }
     if (response.status !== 101 || !socket) {
-      await response.body?.cancel();
-      throw new ApiError(response.status === 429 ? 429 : 502, `Gemini Live handshake failed (HTTP ${response.status}). Check API key and model availability.`);
+      availableText = await $text(response);
+      if (!availableText.trim()) availableText = response.statusText || stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
+      return { ...partialResult(`HTTP ${response.status}`), status: response.status };
     }
     socket.binaryType = "arraybuffer";
     return await new Promise((resolve, reject) => {
       let ready = false;
+      const beforeSetup = [];
       let bytes = 0;
-      let text = "";
-      let usage;
       let settled = false;
       const succeed = result => {
         settled = true;
         resolve(result);
       };
       const fail = message => {
-        settled = true;
-        reject(new ApiError(502, message));
+        if (settled || controller.signal.aborted) return;
+        succeed(partialResult(message));
       };
-      socket.addEventListener("error", () => fail("Gemini Live WebSocket error."));
-      socket.addEventListener("close", event => fail(`Gemini Live closed before completion (code ${event.code}).`));
-      socket.addEventListener("message", event => {
+      socket.addEventListener("error", event => fail(event.message || String(event)));
+      socket.addEventListener("close", event => fail(`Gemini Live closed before completion (code ${event.code}). ${event.reason || String(event)}`.trim()));
+      const handleMessage = (event, replay = false) => {
         if (settled || controller.signal.aborted) return;
         try {
-          bytes += typeof event.data === "string" ? new TextEncoder().encode(event.data).byteLength : event.data.byteLength;
-          if (bytes > MAX_UPSTREAM) return fail("Gemini Live response exceeds 8 MiB.");
-          const message = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder("utf-8", {
+          if (!replay) bytes += isString(event.data) ? new TextEncoder().encode(event.data).byteLength : event.data.byteLength;
+          const message = JSON.parse(isString(event.data) ? event.data : new TextDecoder("utf-8", {
             fatal: true
           }).decode(event.data));
-          if (message.error) return fail("Gemini Live rejected the request. Check model access and setup compatibility.");
-          if (message.setupComplete) {
-            if (ready) return fail("Duplicate Gemini Live setup acknowledgement.");
+          if (message.usageMetadata) usage = message.usageMetadata;
+          if (!replay && isString(message.serverContent?.outputTranscription?.text)) availableText += message.serverContent.outputTranscription.text;
+          if (message.error) return fail(message.error ?? String(message));
+          if (!ready && !message.setupComplete) {
+            beforeSetup.push(event);
+            return;
+          }
+          if (message.setupComplete && !ready) {
             ready = true;
             if (payload.turns.length > 1) {
               const last = payload.turns.at(-1);
@@ -706,24 +855,54 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
                 }
               }));
             }
+            // Send input once, then process early frames in their arrival order.
+            const queued = beforeSetup.splice(0);
+            for (const earlyEvent of queued) {
+              handleMessage(earlyEvent, true);
+              if (settled || controller.signal.aborted) return;
+            }
           }
           if (message.usageMetadata) usage = message.usageMetadata;
-          if (message.toolCallCancellation) return fail("Gemini Live cancelled a tool call.");
-          if (message.toolCall) {
-            const calls = message.toolCall.functionCalls;
+          if (message.toolCallCancellation) {
+            text += `\ntoolCallCancellation:${stringify(message.toolCallCancellation)}\n`;
+          }
+          const content = message.serverContent;
+          const embeddedCalls = [];
+          for (const part of toArr(content?.modelTurn?.parts ?? [])) {
+            if (part?.functionCall != null) embeddedCalls.push(part.functionCall);
+            if (part?.inlineData && !/^audio\/pcm(?:;|$)/i.test(part.inlineData.mimeType || "")) {
+              text += `inlineData:${stringify(part.inlineData)}\n`;
+            }
+            // Discard PCM audio and model text, which may contain thoughts or duplicate the transcript.
+          }
+          if (isString(content?.outputTranscription?.text)) text += content.outputTranscription.text;
+          if (message.toolCall || embeddedCalls.length) {
+            const calls = [...(message.toolCall ? toArr(message.toolCall.functionCalls) : []), ...embeddedCalls];
             const names = new Set(payload.setup.tools?.flatMap(tool => tool.functionDeclarations.map(fn => fn.name)) || []);
             const ids = new Set(payload.historyCallIds || []);
-            if (!ready || !Array.isArray(calls) || !calls.length || calls.length > 128) return fail("Invalid Gemini Live tool call.");
             const toolCalls = [];
-            for (const call of calls) {
-              if (!object(call) || !callId(call.id) || ids.has(call.id) || !names.has(call.name)) return fail("Invalid Gemini Live tool call.");
-              ids.add(call.id);
+            for (const rawCall of calls) {
+              const call = toObj(rawCall);
+              const fn = toObj(call.function ?? call.functionCall ?? call);
+              let name = stringify(fn.name ?? call.name ?? "").trim();
+              if (!names.has(name)) {
+                const matches = [...names].filter(candidate => isString(candidate) && candidate.toLowerCase() === name.toLowerCase());
+                if (name && matches.length === 1) name = matches[0];
+                else if (!name) {
+                  const available = [...names].filter(functionName);
+                  name = available.length === 1 ? available[0] : `unknown_tool_${toolCalls.length + 1}`;
+                }
+              }
+              const baseId = callId(call.id) ? String(call.id) : `call_${randId()}`;
+              let id = baseId;
+              for (let suffix = 1; ids.has(id); suffix++) id = `${baseId}_${suffix}`;
+              ids.add(id);
               toolCalls.push({
-                id: call.id,
+                id,
                 type: "function",
                 function: {
-                  name: call.name,
-                  arguments: JSON.stringify(argumentsObject(call.args))
+                  name,
+                  arguments: JSON.stringify(argumentsObject(fn.args ?? fn.arguments ?? call.args ?? {}))
                 }
               });
             }
@@ -736,34 +915,27 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
               finishReason: "tool_calls"
             });
           }
-          const content = message.serverContent;
           if (!content) return;
-          if (!ready) return fail("Gemini Live sent content before setup completed.");
-          if (content.interrupted) return fail("Gemini Live generation was interrupted.");
-          for (const part of content.modelTurn?.parts || []) {
-            if (part.functionCall || (part.inlineData && !/^audio\/pcm(?:;|$)/i.test(part.inlineData.mimeType || ""))) {
-              return fail("Unexpected non-audio output.");
-            }
-            // Discard audio without decoding or accumulating it. Model text is
-            // not the transcript and may duplicate it or contain thoughts.
+          if (content.interrupted) {
+            // Return partial output; the finally block closes the socket normally.
+            return succeed({ text, usage, finishReason: "stop" });
           }
-          if (typeof content.outputTranscription?.text === "string") text += content.outputTranscription.text;
           // A turn boundary can precede further background processing in 3.8.
           if (content.turnComplete && content.interactionStatus !== "IN_PROGRESS") {
             const reason = content.turnCompleteReason;
-            if (reason === "MALFORMED_FUNCTION_CALL") return fail("Gemini Live produced a malformed function call.");
-            const filtered = reason && !["TURN_COMPLETE_REASON_UNSPECIFIED", "NEED_MORE_INPUT"].includes(reason);
-            if (!text.trim() && !filtered) return fail("Gemini Live completed without an output transcript.");
+            const filtered = reason && !["TURN_COMPLETE_REASON_UNSPECIFIED", "NEED_MORE_INPUT", "MALFORMED_FUNCTION_CALL"].includes(reason);
+            // Return whatever was recovered, including an empty transcript.
             succeed({
-              text,
+              text: stringify(text ?? ""),
               usage,
               finishReason: filtered ? "content_filter" : "stop"
             });
           }
-        } catch {
-          fail("Invalid Gemini Live response.");
+        } catch (e) {
+          text += `\nerror:${stringify(e instanceof Error ? String(e) : e)}\n`;
         }
-      });
+      };
+      socket.addEventListener("message", event => handleMessage(event));
       socket.accept();
       socket.send(JSON.stringify({
         setup: payload.setup
@@ -773,8 +945,7 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
   try {
     return await Promise.race([work(), cancelled]);
   } catch (error) {
-    if (error instanceof ApiError) throw error;
-    throw new ApiError(502, "Unable to connect to Gemini Live.");
+    return partialResult(error);
   } finally {
     clearTimeout(timer);
     signal.removeEventListener("abort", onAbort);
@@ -793,7 +964,6 @@ export default {
   async fetch(request, env) {
     try {
       const pathname = new URL(request.url).pathname;
-      if (!["/v1/chat/completions", "/v1/models"].includes(pathname)) throw new ApiError(404, "Not found.");
       const apiKey = geminiKey(request);
       if (pathname === "/v1/models" && request.method === "GET") return json({
         object: "list",
@@ -804,10 +974,8 @@ export default {
           owned_by: "google"
         }]
       });
-      if (pathname !== "/v1/chat/completions" || request.method !== "POST") throw new ApiError(405, "Method not allowed.");
       const payload = translate(await readJson(request));
       const timeout = Number(env.TIMEOUT_MS || 180000);
-      if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 600000) throw new ApiError(503, "TIMEOUT_MS must be 1000..600000.");
       const result = await completeLive(payload, apiKey, request.signal, timeout);
       const response = {
         id: `chatcmpl-${crypto.randomUUID()}`,
@@ -835,17 +1003,26 @@ export default {
           total_tokens: u.totalTokenCount
         };
       }
-      return json(response);
+      // These statuses cannot carry a JSON body; retain the upstream code in metadata.
+      const status = result.status ?? 200;
+      if (status < 200 || [204, 205, 304].includes(status)) response.upstream_status = status;
+      return json(response, response.upstream_status === undefined ? status : 502);
     } catch (error) {
-      const known = error instanceof ApiError;
-      const status = known ? error.status : 500;
+      const status = error instanceof ApiError ? error.status : 500;
       return json({
-        error: {
-          message: known ? error.message : "Internal server error.",
-          type: status < 500 ? "invalid_request_error" : "server_error",
-          param: known ? error.param : null,
-          code: null
-        }
+        id: `chatcmpl-${randId()}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: MODEL,
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: stringify(error instanceof Error ? String(error) : error)
+          },
+          finish_reason: "stop",
+          logprobs: null
+        }]
       }, status);
     }
   },
