@@ -270,7 +270,7 @@ async function bestEffortResponse(response) {
           }
         } catch (streamError) {
           // A mid-stream network drop or timeout caught here!
-         Q(()=> controller.enqueue(encode(streamError)));
+          Q(() => controller.enqueue(encode(streamError)));
           console.warn(
             "Stream interrupted prematurely. Closing stream gracefully with partial data.",
             streamError,
@@ -326,7 +326,7 @@ async function $bytes(res) {
       }
     }
   } catch (e) {
-     chunks.push(encode(String(e)));
+    chunks.push(encode(String(e)));
   } finally {
     Q(() => reader?.releaseLock?.()?.catch?.(() => {}));
   }
