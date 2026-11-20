@@ -820,6 +820,9 @@ export function translate(body) {
   const generationConfig = {
     responseModalities: ["AUDIO"],
   };
+  if (/thinking/i.test(model)) {
+    generationConfig.thinkingConfig = { thinkingLevel: "HIGH" };
+  }
   for (const [source, target, maximum] of [
     ["temperature", "temperature", 2],
     ["top_p", "topP", 1],
