@@ -1,4 +1,4 @@
-import * as util from 'node:util';
+import * as util from "node:util";
 
 const overwrite = (obj, prop, val) => {
   Object.defineProperty(obj, prop, {
@@ -31,25 +31,25 @@ const assignAll = (target, ...srcs) => {
     }
   }
   return target;
-}
+};
 
-const flattenObject = req => {
+const flattenObject = (req) => {
   req = Object(req);
   const obj = {};
   for (const key in req) {
-    if (typeof req[key] !== 'function') {
+    if (typeof req[key] !== "function") {
       obj[key] = req[key];
     }
   }
   for (const key of Reflect.ownKeys(req)) {
-    if (typeof req[key] !== 'function') {
+    if (typeof req[key] !== "function") {
       obj[String(key)] = req[key];
     }
   }
   return obj;
 };
 
-const flattenRequest = req => {
+const flattenRequest = (req) => {
   return {
     ...flattenObject(req),
     ...Object.fromEntries(req.headers.entries()),
@@ -57,7 +57,7 @@ const flattenRequest = req => {
   };
 };
 
-const flattenArray = arr => {
+const flattenArray = (arr) => {
   return assignAll({}, arr, ...arr.map(flattenObject));
 };
 
@@ -70,7 +70,7 @@ const instanceOf = (value, constructor) => {
 };
 
 const isString = (value) =>
-  typeof value === 'string' || instanceOf(value, String);
+  typeof value === "string" || instanceOf(value, String);
 
 const isArray = (value) => {
   try {
@@ -78,15 +78,15 @@ const isArray = (value) => {
   } catch {
     return false;
   }
-}
+};
 
-const isObject = value => typeof value === 'object' && value !== null;
+const isObject = (value) => typeof value === "object" && value !== null;
 
 const randId = () => {
   try {
     return crypto.randomUUID();
   } catch {
-    return String(Math.random()).replace('0.', '');
+    return String(Math.random()).replace("0.", "");
   }
 };
 
@@ -104,7 +104,7 @@ const stringify = (value) => {
         try {
           return String(e);
         } catch {
-          return '';
+          return "";
         }
       }
     }
@@ -152,12 +152,17 @@ function parseTruncatedJSON(text) {
     };
     while (index < text.length) {
       const char = text[index++];
-      if (char === '"') return {
-        value: chars.join(""),
-        complete: true
-      };
+      if (char === '"')
+        return {
+          value: chars.join(""),
+          complete: true,
+        };
       if (char !== backslash) {
-        chars.push(char.charCodeAt(0) < 0x20 ? String.fromCharCode(char.charCodeAt(0)) : char);
+        chars.push(
+          char.charCodeAt(0) < 0x20
+            ? String.fromCharCode(char.charCodeAt(0))
+            : char,
+        );
         continue;
       }
       if (index === text.length) {
@@ -172,13 +177,13 @@ function parseTruncatedJSON(text) {
             chars.push(backslash + "u" + hex);
             return {
               value: chars.join(""),
-              complete: false
+              complete: false,
             };
           }
           if (!/[0-9a-fA-F]/.test(text[index])) break;
           hex += text[index++];
         }
-        chars.push(String.fromCharCode(parseInt(hex.padStart(4, '0'), 16)));
+        chars.push(String.fromCharCode(parseInt(hex.padStart(4, "0"), 16)));
       } else if (Object.hasOwn(escapes, escape)) {
         chars.push(escapes[escape]);
       } else {
@@ -187,13 +192,17 @@ function parseTruncatedJSON(text) {
     }
     return {
       value: chars.join(""),
-      complete: false
+      complete: false,
     };
   }
 
   function readToken() {
     const start = index;
-    while (index < text.length && !isWhitespace(text[index]) && !'{}[],:"'.includes(text[index])) {
+    while (
+      index < text.length &&
+      !isWhitespace(text[index]) &&
+      !'{}[],:"'.includes(text[index])
+    ) {
       index++;
     }
     return text.slice(start, index);
@@ -202,10 +211,10 @@ function parseTruncatedJSON(text) {
   function readScalar() {
     if (text[index] === '"') return readString().value;
     const token = readToken();
-    if (token[0] === 't') return true;
-    if (token[0] === 'f') return false;
-    if (token[0] === 'n') return null;
-    if (token === '-') return null;
+    if (token[0] === "t") return true;
+    if (token[0] === "f") return false;
+    if (token[0] === "n") return null;
+    if (token === "-") return null;
     const number = parseFloat(token);
     return Number.isNaN(number) ? token : number;
   }
@@ -234,7 +243,10 @@ function parseTruncatedJSON(text) {
     skipWhitespace();
     let frame = stack[stack.length - 1];
     if (index === text.length) {
-      if (frame?.kind === "object" && (frame.state === "colon" || frame.state === "value")) {
+      if (
+        frame?.kind === "object" &&
+        (frame.state === "colon" || frame.state === "value")
+      ) {
         attach(null);
       }
       return result;
@@ -242,8 +254,11 @@ function parseTruncatedJSON(text) {
     const char = text[index];
 
     // Either closer ends the current frame. Unmatched closers are ignored.
-    if (char === ']' || char === '}') {
-      if (frame?.kind === 'object' && (frame.state === 'colon' || frame.state === 'value')) {
+    if (char === "]" || char === "}") {
+      if (
+        frame?.kind === "object" &&
+        (frame.state === "colon" || frame.state === "value")
+      ) {
         attach(null);
       }
       stack.pop();
@@ -251,42 +266,56 @@ function parseTruncatedJSON(text) {
       continue;
     }
 
-    if (!frame && hasRoot && char !== ',' && char !== ':') {
-      if (result === null || typeof result !== 'object') result = [result];
+    if (!frame && hasRoot && char !== "," && char !== ":") {
+      if (result === null || typeof result !== "object") result = [result];
       frame = {
-        kind: isArray(result) ? 'array' : 'object',
+        kind: isArray(result) ? "array" : "object",
         value: result,
-        state: 'separator'
+        state: "separator",
       };
       stack.push(frame);
     }
 
-    if (char === ',') {
-      if (frame?.kind === 'object' && (frame.state === 'colon' || frame.state === 'value')) {
+    if (char === ",") {
+      if (
+        frame?.kind === "object" &&
+        (frame.state === "colon" || frame.state === "value")
+      ) {
         attach(null);
-      } else if (frame?.kind === 'array' && (frame.state === 'first' || frame.state === 'value')) {
+      } else if (
+        frame?.kind === "array" &&
+        (frame.state === "first" || frame.state === "value")
+      ) {
         attach(null);
       }
-      if (frame) frame.state = frame.kind === 'array' ? 'value' : 'key';
+      if (frame) frame.state = frame.kind === "array" ? "value" : "key";
       index++;
       continue;
     }
-    if (char === ':') {
-      if (frame?.state === 'colon') frame.state = 'value';
+    if (char === ":") {
+      if (frame?.state === "colon") frame.state = "value";
       index++;
       continue;
     }
 
     if (frame) {
-      if (frame.state === 'separator') frame.state = frame.kind === 'array' ? 'value' : 'key';
-      if (frame.kind === 'object' && (frame.state === 'first' || frame.state === 'key')) {
+      if (frame.state === "separator")
+        frame.state = frame.kind === "array" ? "value" : "key";
+      if (
+        frame.kind === "object" &&
+        (frame.state === "first" || frame.state === "key")
+      ) {
         // Structural openers in a key slot are literal one-character keys.
-        frame.key = char === '"' ? readString().value :
-          char === '{' || char === '[' ? text[index++] : readToken();
-        frame.state = 'colon';
+        frame.key =
+          char === '"'
+            ? readString().value
+            : char === "{" || char === "["
+              ? text[index++]
+              : readToken();
+        frame.state = "colon";
         continue;
       }
-      if (frame.state === 'colon') frame.state = 'value';
+      if (frame.state === "colon") frame.state = "value";
     }
 
     if (char === "{" || char === "[") {
@@ -295,7 +324,7 @@ function parseTruncatedJSON(text) {
       stack.push({
         kind: char === "{" ? "object" : "array",
         value,
-        state: "first"
+        state: "first",
       });
       index++;
     } else {
@@ -304,7 +333,7 @@ function parseTruncatedJSON(text) {
   }
 }
 
-const Q = fn => {
+const Q = (fn) => {
   try {
     return fn();
   } catch {}
@@ -321,7 +350,7 @@ const safeStatusText = (value) =>
     return flat.replaceAll(String.fromCharCode(127), "DEL");
   }) ?? "";
 
-const isNullish = x => x === null || x === undefined;
+const isNullish = (x) => x === null || x === undefined;
 
 async function bestEffortResponse(response) {
   try {
@@ -333,10 +362,7 @@ async function bestEffortResponse(response) {
     const resilientStream = new ReadableStream({
       async pull(controller) {
         try {
-          const {
-            done,
-            value
-          } = await originalReader.read();
+          const { done, value } = await originalReader.read();
 
           if (done == true || (isNullish(done) && isNullish(value))) {
             Q(() => controller.close());
@@ -366,7 +392,7 @@ async function bestEffortResponse(response) {
   } catch (e) {
     return new Response(String(e), {
       status: 500,
-      statusText: safeStatusText(e)
+      statusText: safeStatusText(e),
     });
   }
 }
@@ -378,7 +404,7 @@ async function bestEffortFetch(input, init) {
   } catch (e) {
     return new Response(String(e), {
       status: 500,
-      statusText: safeStatusText(e)
+      statusText: safeStatusText(e),
     });
   }
 }
@@ -390,10 +416,7 @@ async function $bytes(res) {
     reader = res?.body?.getReader?.();
     if (reader) {
       while (true) {
-        const {
-          done,
-          value
-        } = await reader.read();
+        const { done, value } = await reader.read();
         if (done == true || (isNullish(done) && isNullish(value))) {
           break;
         }
@@ -414,7 +437,7 @@ const decode = decoder.decode.bind(decoder);
 async function $text(res) {
   try {
     if (!res.body) {
-      return res.statusText || '';
+      return res.statusText || "";
     }
     return decode(await $bytes(res));
   } catch (e) {
@@ -422,7 +445,7 @@ async function $text(res) {
   }
 }
 
-const toObj = obj => {
+const toObj = (obj) => {
   if (isString(obj)) {
     obj = assignAll(Object(obj), Object(parseTruncatedJSON(obj)));
   }
@@ -430,9 +453,9 @@ const toObj = obj => {
     return flattenArray(obj);
   }
   return Object(obj);
-}
+};
 
-const toArr = arr => {
+const toArr = (arr) => {
   if (!isArray(arr)) {
     if (isString(arr)) {
       return [assignAll(Object(arr), parseTruncatedJSON(arr))];
@@ -446,24 +469,36 @@ const toArr = arr => {
   return arr;
 };
 
-const tryB64 = str => {
+const tryB64 = (str) => {
   try {
-    str = str.replace(/=+$/, '').replaceAll('-', '+').replaceAll('_', '/');
-    return Uint8Array.from(atob(str.padEnd(Math.ceil(str.length / 4) * 4, '=')), char => char.charCodeAt(0));
+    str = str.replace(/=+$/, "").replaceAll("-", "+").replaceAll("_", "/");
+    return Uint8Array.from(
+      atob(str.padEnd(Math.ceil(str.length / 4) * 4, "=")),
+      (char) => char.charCodeAt(0),
+    );
   } catch {
     return encode(str);
   }
 };
 
-const concat = parts => {
-  const outputs = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+const concat = (parts) => {
+  const outputs = new Uint8Array(
+    parts.reduce((length, part) => length + part.length, 0),
+  );
   let output = 0;
-  for (const part of parts) outputs.set(part, output), output += part.length;
+  for (const part of parts)
+    (outputs.set(part, output), (output += part.length));
   return outputs;
 };
 
-const base64ToBytes = x => instanceOf(x, Uint8Array) ? x :
-  concat(stringify(x).split(/([\w+/=-]{4,})/).map((s, i) => i % 2 ? tryB64(s) : encode(s)));
+const base64ToBytes = (x) =>
+  instanceOf(x, Uint8Array)
+    ? x
+    : concat(
+        stringify(x)
+          .split(/([\w+/=-]{4,})/)
+          .map((s, i) => (i % 2 ? tryB64(s) : encode(s))),
+      );
 
 const fetchResponse = async (...args) => {
   try {
@@ -471,13 +506,14 @@ const fetchResponse = async (...args) => {
   } catch (e) {
     return new Response(String(e), {
       status: 500,
-      statusText: safeStatusText(e)
+      statusText: safeStatusText(e),
     });
   }
 };
 
 // Stateless Chat Completions -> Gemini Live bridge. One session per request.
-const ENDPOINT = "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+const ENDPOINT =
+  "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const MODEL = "gemini-3.8-live";
 const MAX_BODY = 1024 * 1024;
 const MAX_UPSTREAM = 8 * 1024 * 1024;
@@ -492,15 +528,18 @@ class ApiError extends Error {
 const invalid = (message, param) => {
   throw new ApiError(400, message, param);
 };
-const json = (value, status = 200) => Response.json(value, {
-  status,
-  headers: {
-    "Cache-Control": "no-store"
-  },
-});
+const json = (value, status = 200) =>
+  Response.json(value, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
 
 function geminiKey(request) {
-  const token = /^Bearer[ \t]+([^\s]+)$/i.exec(request?.headers?.get?.("Authorization") || "")?.[1];
+  const token = /^Bearer[ \t]+([^\s]+)$/i.exec(
+    request?.headers?.get?.("Authorization") || "",
+  )?.[1];
   return String(token);
 }
 
@@ -509,14 +548,13 @@ async function readJson(message) {
   return parseTruncatedJSON(text);
 }
 
-const object = value => value !== null && typeof value === "object" && !isArray(value);
-const functionName = value => isString(value) && value.trim().length > 0;
+const object = (value) =>
+  value !== null && typeof value === "object" && !isArray(value);
+const functionName = (value) => isString(value) && value.trim().length > 0;
 const callId = functionName;
 // Bound even ignored metadata without recursion or forwarding it upstream.
 function bodyDepth(value) {
-  const stack = [
-    [value, 0]
-  ];
+  const stack = [[value, 0]];
   while (stack.length) {
     const [node, depth] = stack.pop();
     if (node && typeof node === "object") {
@@ -529,11 +567,14 @@ function bodyDepth(value) {
 
 function textParts(content) {
   if (content == null) return [];
-  if (isString(content)) return [{
-    text: content
-  }];
-  return toArr(content).map(part => ({
-    text: stringify(part?.text ?? part)
+  if (isString(content))
+    return [
+      {
+        text: content,
+      },
+    ];
+  return toArr(content).map((part) => ({
+    text: stringify(part?.text ?? part),
   }));
 }
 
@@ -552,16 +593,27 @@ function toolData(value, param, wrapArguments = false) {
       value = parseTruncatedJSON(value, param);
     }
   }
-  if (wrapArguments) value = value === undefined ? {} : object(value) ? value : {
-    value
-  };
+  if (wrapArguments)
+    value =
+      value === undefined
+        ? {}
+        : object(value)
+          ? value
+          : {
+              value,
+            };
   let count = 0;
 
   function copy(value, depth) {
     if (typeof value === "number" && !Number.isFinite(value)) return null;
     if (value === null || typeof value !== "object") return value;
-    if (isArray(value)) return value.map(child => copy(child, depth + 1));
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copy(child, depth + 1)]));
+    if (isArray(value)) return value.map((child) => copy(child, depth + 1));
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        copy(child, depth + 1),
+      ]),
+    );
   }
   return copy(value, 0);
 }
@@ -570,10 +622,12 @@ function parametersSchema(value) {
   const schema = toolData(value, "tools");
   // Like translateRequest in chat-interactions, do not impose type:object or
   // rewrite schema keywords. Only non-schema roots use the empty-schema fallback.
-  return object(schema) || typeof schema === "boolean" ? schema : {
-    type: "object",
-    properties: {}
-  };
+  return object(schema) || typeof schema === "boolean"
+    ? schema
+    : {
+        type: "object",
+        properties: {},
+      };
 }
 
 function argumentsObject(value) {
@@ -586,7 +640,9 @@ function argumentsObject(value) {
 export function translate(body) {
   body = Object(body);
   bodyDepth(body);
-  const model = isString(body.model) ? body.model.trim().replace(/^models\//, "") || MODEL : MODEL;
+  const model = isString(body.model)
+    ? body.model.trim().replace(/^models\//, "") || MODEL
+    : MODEL;
   body.messages = toArr(body.messages ?? body);
   const declarations = [];
   const names = new Set();
@@ -598,11 +654,13 @@ export function translate(body) {
       names.add(fn.name);
       declarations.push({
         name: fn.name,
-        ...(isString(fn.description) ? {
-          description: fn.description
-        } : {}),
+        ...(isString(fn.description)
+          ? {
+              description: fn.description,
+            }
+          : {}),
         parametersJsonSchema,
-        behavior: "BLOCKING"
+        behavior: "BLOCKING",
       });
     }
   }
@@ -612,23 +670,29 @@ export function translate(body) {
   const pending = new Map();
   const pendingAsText = () => {
     for (const turn of turns) {
-      turn.parts = turn.parts.map(part => part.functionCall && pending.has(part.functionCall.id) ? {
-        text: `tool_call:${stringify(part.functionCall)}`
-      } : part);
+      turn.parts = turn.parts.map((part) =>
+        part.functionCall && pending.has(part.functionCall.id)
+          ? {
+              text: `tool_call:${stringify(part.functionCall)}`,
+            }
+          : part,
+      );
     }
     pending.clear();
   };
   for (const originalMessage of toArr(body.messages ?? body ?? [])) {
     const message = {
-      ...originalMessage
+      ...originalMessage,
     };
     if (message.function_call != null) {
       if (!message.tool_calls?.length) {
-        message.tool_calls = [{
-          id: `call_${randId()}`,
-          type: "function",
-          function: message.function_call
-        }];
+        message.tool_calls = [
+          {
+            id: `call_${randId()}`,
+            type: "function",
+            function: message.function_call,
+          },
+        ];
       }
       message.role = "assistant";
       delete message.function_call;
@@ -636,14 +700,22 @@ export function translate(body) {
     if (message.role === "function") {
       message.role = "tool";
     }
-    if (!["system", "developer", "user", "assistant", "tool"].includes(message.role)) {
-      message.role = 'user';
+    if (
+      !["system", "developer", "user", "assistant", "tool"].includes(
+        message.role,
+      )
+    ) {
+      message.role = "user";
     }
     if (message.audio != null) {
-      message.content = [...textParts(message.content), {
-          text: `audio:${stringify(message.audio)}`
-        }]
-        .map(part => part.text).join("\n");
+      message.content = [
+        ...textParts(message.content),
+        {
+          text: `audio:${stringify(message.audio)}`,
+        },
+      ]
+        .map((part) => part.text)
+        .join("\n");
       delete message.audio;
     }
     if (message.tool_calls != null) {
@@ -651,16 +723,20 @@ export function translate(body) {
     }
     if (message.role === "tool") {
       if (!callId(message.tool_call_id)) {
-        const matches = [...pending].filter(([, name]) => !functionName(message.name) || name === message.name);
+        const matches = [...pending].filter(
+          ([, name]) => !functionName(message.name) || name === message.name,
+        );
         if (matches.length === 1) message.tool_call_id = matches[0][0];
       }
       const name = pending.get(message.tool_call_id);
       if (!name) {
         turns.push({
           role: "user",
-          parts: [{
-            text: `tool_result:${stringify(message)}`
-          }]
+          parts: [
+            {
+              text: `tool_result:${stringify(message)}`,
+            },
+          ],
         });
         continue;
       }
@@ -669,33 +745,46 @@ export function translate(body) {
       if (isString(result)) {
         result = parseTruncatedJSON(result);
       }
-      result = toolData({
-        result
-      }, "messages").result;
+      result = toolData(
+        {
+          result,
+        },
+        "messages",
+      ).result;
       const part = {
         functionResponse: {
           id: message.tool_call_id,
           name,
-          response: object(result) ? result : {
-            result
-          }
-        }
+          response: object(result)
+            ? result
+            : {
+                result,
+              },
+        },
       };
-      if (turns.at(-1)?.parts[0]?.functionResponse) turns.at(-1).parts.push(part);
-      else turns.push({
-        role: "user",
-        parts: [part]
-      });
+      if (turns.at(-1)?.parts[0]?.functionResponse)
+        turns.at(-1).parts.push(part);
+      else
+        turns.push({
+          role: "user",
+          parts: [part],
+        });
       pending.delete(message.tool_call_id);
       continue;
     }
     if (pending.size) pendingAsText();
     const parts = textParts(message.content);
     for (const call of message.tool_calls ?? []) {
-      if (!object(call) || (call.type != null && call.type !== "function") || !object(call.function) ||
-        !callId(call.id) || ids.has(call.id) || !functionName(call.function.name)) {
+      if (
+        !object(call) ||
+        (call.type != null && call.type !== "function") ||
+        !object(call.function) ||
+        !callId(call.id) ||
+        ids.has(call.id) ||
+        !functionName(call.function.name)
+      ) {
         parts.push({
-          text: `tool_call:${stringify(call)}`
+          text: `tool_call:${stringify(call)}`,
         });
         continue;
       }
@@ -705,60 +794,116 @@ export function translate(body) {
         functionCall: {
           id: call.id,
           name: call.function.name,
-          args: argumentsObject(call.function.arguments)
-        }
+          args: argumentsObject(call.function.arguments),
+        },
       });
     }
     if (["system", "developer"].includes(message.role)) {
       instructions.push(...parts);
-    } else if (parts.length) turns.push({
-      role: message.role === "assistant" ? "model" : "user",
-      parts
-    });
+    } else if (parts.length)
+      turns.push({
+        role: message.role === "assistant" ? "model" : "user",
+        parts,
+      });
   }
   if (pending.size) pendingAsText();
   // Empty/instruction-only input and assistant-ended history need an explicit trigger.
-  if (turns.at(-1)?.role !== "user") turns.push({
-    role: "user",
-    parts: [{
-      text: "Continue."
-    }]
-  });
+  if (turns.at(-1)?.role !== "user")
+    turns.push({
+      role: "user",
+      parts: [
+        {
+          text: "Continue.",
+        },
+      ],
+    });
   const generationConfig = {
-    responseModalities: ["AUDIO"]
+    responseModalities: ["AUDIO"],
   };
   for (const [source, target, maximum] of [
-      ["temperature", "temperature", 2],
-      ["top_p", "topP", 1]
-    ]) {
+    ["temperature", "temperature", 2],
+    ["top_p", "topP", 1],
+  ]) {
     const value = numeric(body[source]);
-    if (value !== undefined) generationConfig[target] = Math.min(maximum, Math.max(0, value));
+    if (value !== undefined)
+      generationConfig[target] = Math.min(maximum, Math.max(0, value));
   }
   const limit = numeric(body.max_completion_tokens) ?? numeric(body.max_tokens);
-  if (limit !== undefined) generationConfig.maxOutputTokens = Math.min(65536, Math.max(1, Math.trunc(limit)));
+  if (limit !== undefined)
+    generationConfig.maxOutputTokens = Math.min(
+      65536,
+      Math.max(1, Math.trunc(limit)),
+    );
   const setup = {
     model: `models/${model}`,
     generationConfig,
-    outputAudioTranscription: {}
+    outputAudioTranscription: {},
   };
-  if (instructions.length) setup.systemInstruction = {
-    parts: instructions
-  };
+  if (instructions.length)
+    setup.systemInstruction = {
+      parts: instructions,
+    };
   // none is enforced by withholding declarations, not an unverified toolConfig.
-  if (declarations.length && body.tool_choice !== "none") setup.tools = [{
-    functionDeclarations: declarations
-  }];
-  if (turns.length > 1) setup.historyConfig = {
-    initialHistoryInClientContent: true
-  };
+  if (declarations.length && body.tool_choice !== "none")
+    setup.tools = [
+      {
+        functionDeclarations: declarations,
+      },
+    ];
+  if (turns.length > 1)
+    setup.historyConfig = {
+      initialHistoryInClientContent: true,
+    };
   return {
     setup,
     turns,
-    historyCallIds: [...ids]
+    historyCallIds: [...ids],
   };
 }
 
-export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, fetchImpl = fetchResponse) {
+export async function completeLive(
+  payload,
+  apiKey,
+  signal,
+  timeoutMs = 180000,
+  fetchImpl = fetchResponse,
+) {
+  const started = Date.now();
+  const first = await completeLiveAttempt(payload, apiKey, signal, timeoutMs, fetchImpl);
+  const { unsupportedBlocking, ...result } = first;
+  const remaining = timeoutMs - (Date.now() - started);
+  if (!unsupportedBlocking || signal.aborted || remaining <= 0) return result;
+
+  const asText = (part) => {
+    if (part.functionCall != null) return { text: `tool_call:${stringify(part.functionCall)}` };
+    if (part.functionResponse != null) return { text: `tool_result:${stringify(part.functionResponse)}` };
+    return part;
+  };
+  const { tools, toolConfig, ...setup } = payload.setup;
+  setup.systemInstruction = {
+    ...setup.systemInstruction,
+    parts: [
+      ...(setup.systemInstruction?.parts ?? []).map(asText),
+      { text: `Tools are unavailable in this session. Treat these definitions and tool history as text only; do not claim to execute tools.\nTool definitions:${stringify(tools ?? [])}` },
+    ],
+  };
+  const retry = await completeLiveAttempt({
+    ...payload,
+    setup,
+    turns: payload.turns.map(turn => ({ ...turn, parts: turn.parts.map(asText) })),
+    historyCallIds: [],
+  }, apiKey, signal, remaining, fetchImpl);
+  const { unsupportedBlocking: ignored, ...retriedResult } = retry;
+  return retriedResult;
+}
+
+async function completeLiveAttempt(
+  payload,
+  apiKey,
+  signal,
+  timeoutMs,
+  fetchImpl,
+) {
   const controller = new AbortController();
   let socket;
   let timer;
@@ -766,17 +911,21 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
   let text = "";
   let usage;
   let availableText = "";
-  const partialResult = error => ({
-    text: text.trim() ? text : availableText.trim() ? availableText : `error:${stringify(error instanceof Error ? String(error) : error)}`,
+  const partialResult = (error) => ({
+    text: text.trim()
+      ? text
+      : availableText.trim()
+        ? availableText
+        : `error:${stringify(error instanceof Error ? String(error) : error)}`,
     usage,
     status: error instanceof ApiError ? error.status : 502,
-    finishReason: "stop"
+    finishReason: "stop",
   });
   let resolvePending;
-  const cancelled = new Promise(resolve => {
+  const cancelled = new Promise((resolve) => {
     resolvePending = resolve;
   });
-  const abort = error => {
+  const abort = (error) => {
     const result = partialResult(error);
     if (text.trim() || availableText.trim()) result.status = 200;
     resolvePending(result);
@@ -784,14 +933,17 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
   };
   onAbort = () => abort(new ApiError(499, "Client disconnected."));
   signal.addEventListener("abort", onAbort, {
-    once: true
+    once: true,
   });
-  timer = setTimeout(() => abort(new ApiError(504, "Gemini Live request timed out.")), timeoutMs);
+  timer = setTimeout(
+    () => abort(new ApiError(504, "Gemini Live request timed out.")),
+    timeoutMs,
+  );
   const work = async () => {
     const response = await fetchImpl(ENDPOINT, {
       headers: {
         Upgrade: "websocket",
-        "x-goog-api-key": apiKey
+        "x-goog-api-key": apiKey,
       },
       signal: controller.signal,
     });
@@ -804,10 +956,13 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
     }
     if (response.status !== 101 || !socket) {
       availableText = await $text(response);
-      if (!availableText.trim()) availableText = response.statusText || stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
+      if (!availableText.trim())
+        availableText =
+          response.statusText ||
+          stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
       return {
         ...partialResult(`HTTP ${response.status}`),
-        status: response.status
+        status: response.status,
       };
     }
     socket.binaryType = "arraybuffer";
@@ -816,25 +971,45 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
       const beforeSetup = [];
       let bytes = 0;
       let settled = false;
-      const succeed = result => {
+      const succeed = (result) => {
         settled = true;
         resolve(result);
       };
-      const fail = message => {
+      const fail = (message) => {
         if (settled || controller.signal.aborted) return;
         succeed(partialResult(message));
       };
-      socket.addEventListener("error", event => fail(event.message || String(event)));
-      socket.addEventListener("close", event => fail(`Gemini Live closed before completion (code ${event.code}). ${event.reason || String(event)}`.trim()));
+      socket.addEventListener("error", (event) =>
+        fail(event.message || String(event)),
+      );
+      socket.addEventListener("close", (event) => {
+        if (settled || controller.signal.aborted) return;
+        const message = `Gemini Live closed before completion (code ${event.code}). ${event.reason || String(event)}`.trim();
+        if (event.code === 1007 || /BLOCKING function calls are not supported for this model/i.test(event.reason)) {
+          return succeed({ ...partialResult(message), unsupportedBlocking: true });
+        }
+        fail(message);
+      });
       const handleMessage = (event, replay = false) => {
         if (settled || controller.signal.aborted) return;
         try {
-          if (!replay) bytes += isString(event.data) ? new TextEncoder().encode(event.data).byteLength : event.data.byteLength;
-          const message = JSON.parse(isString(event.data) ? event.data : new TextDecoder("utf-8", {
-            fatal: true
-          }).decode(event.data));
+          if (!replay)
+            bytes += isString(event.data)
+              ? new TextEncoder().encode(event.data).byteLength
+              : event.data.byteLength;
+          const message = JSON.parse(
+            isString(event.data)
+              ? event.data
+              : new TextDecoder("utf-8", {
+                  fatal: true,
+                }).decode(event.data),
+          );
           if (message.usageMetadata) usage = message.usageMetadata;
-          if (!replay && isString(message.serverContent?.outputTranscription?.text)) availableText += message.serverContent.outputTranscription.text;
+          if (
+            !replay &&
+            isString(message.serverContent?.outputTranscription?.text)
+          )
+            availableText += message.serverContent.outputTranscription.text;
           if (message.error) return fail(message.error ?? String(message));
           if (!ready && !message.setupComplete) {
             beforeSetup.push(event);
@@ -844,28 +1019,39 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
             ready = true;
             if (payload.turns.length > 1) {
               const last = payload.turns.at(-1);
-              const toolResults = last.parts.some(part => part.functionResponse);
+              const toolResults = last.parts.some(
+                (part) => part.functionResponse,
+              );
               // Old call IDs are history, not pending calls in this new socket.
               // Seed complete structured results; trigger a new inference explicitly.
-              socket.send(JSON.stringify({
-                clientContent: {
-                  turns: toolResults ? payload.turns : payload.turns.slice(0, -1),
-                  turnComplete: false
-                }
-              }));
-              socket.send(JSON.stringify({
-                realtimeInput: {
-                  text: toolResults ?
-                    "Continue from the supplied tool results and answer the preceding request." : last.parts.map(part => part.text).join("\n")
-                }
-              }));
+              socket.send(
+                JSON.stringify({
+                  clientContent: {
+                    turns: toolResults
+                      ? payload.turns
+                      : payload.turns.slice(0, -1),
+                    turnComplete: false,
+                  },
+                }),
+              );
+              socket.send(
+                JSON.stringify({
+                  realtimeInput: {
+                    text: toolResults
+                      ? "Continue from the supplied tool results and answer the preceding request."
+                      : last.parts.map((part) => part.text).join("\n"),
+                  },
+                }),
+              );
             } else {
-              socket.send(JSON.stringify({
-                clientContent: {
-                  turns: payload.turns,
-                  turnComplete: true
-                }
-              }));
+              socket.send(
+                JSON.stringify({
+                  clientContent: {
+                    turns: payload.turns,
+                    turnComplete: true,
+                  },
+                }),
+              );
             }
             // Send input once, then process early frames in their arrival order.
             const queued = beforeSetup.splice(0);
@@ -881,16 +1067,30 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
           const content = message.serverContent;
           const embeddedCalls = [];
           for (const part of toArr(content?.modelTurn?.parts ?? [])) {
-            if (part?.functionCall != null) embeddedCalls.push(part.functionCall);
-            if (part?.inlineData && !/^audio\/pcm(?:;|$)/i.test(part.inlineData.mimeType || "")) {
+            if (part?.functionCall != null)
+              embeddedCalls.push(part.functionCall);
+            if (
+              part?.inlineData &&
+              !/^audio\/pcm(?:;|$)/i.test(part.inlineData.mimeType || "")
+            ) {
               text += `inlineData:${stringify(part.inlineData)}\n`;
             }
             // Discard PCM audio and model text, which may contain thoughts or duplicate the transcript.
           }
-          if (isString(content?.outputTranscription?.text)) text += content.outputTranscription.text;
+          if (isString(content?.outputTranscription?.text))
+            text += content.outputTranscription.text;
           if (message.toolCall || embeddedCalls.length) {
-            const calls = [...(message.toolCall ? toArr(message.toolCall.functionCalls) : []), ...embeddedCalls];
-            const names = new Set(payload.setup.tools?.flatMap(tool => tool.functionDeclarations.map(fn => fn.name)) || []);
+            const calls = [
+              ...(message.toolCall
+                ? toArr(message.toolCall.functionCalls)
+                : []),
+              ...embeddedCalls,
+            ];
+            const names = new Set(
+              payload.setup.tools?.flatMap((tool) =>
+                tool.functionDeclarations.map((fn) => fn.name),
+              ) || [],
+            );
             const ids = new Set(payload.historyCallIds || []);
             const toolCalls = [];
             for (const rawCall of calls) {
@@ -898,24 +1098,36 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
               const fn = toObj(call.function ?? call.functionCall ?? call);
               let name = stringify(fn.name ?? call.name ?? "").trim();
               if (!names.has(name)) {
-                const matches = [...names].filter(candidate => isString(candidate) && candidate.toLowerCase() === name.toLowerCase());
+                const matches = [...names].filter(
+                  (candidate) =>
+                    isString(candidate) &&
+                    candidate.toLowerCase() === name.toLowerCase(),
+                );
                 if (name && matches.length === 1) name = matches[0];
                 else if (!name) {
                   const available = [...names].filter(functionName);
-                  name = available.length === 1 ? available[0] : `unknown_tool_${toolCalls.length + 1}`;
+                  name =
+                    available.length === 1
+                      ? available[0]
+                      : `unknown_tool_${toolCalls.length + 1}`;
                 }
               }
-              const baseId = callId(call.id) ? String(call.id) : `call_${randId()}`;
+              const baseId = callId(call.id)
+                ? String(call.id)
+                : `call_${randId()}`;
               let id = baseId;
-              for (let suffix = 1; ids.has(id); suffix++) id = `${baseId}_${suffix}`;
+              for (let suffix = 1; ids.has(id); suffix++)
+                id = `${baseId}_${suffix}`;
               ids.add(id);
               toolCalls.push({
                 id,
                 type: "function",
                 function: {
                   name,
-                  arguments: JSON.stringify(argumentsObject(fn.args ?? fn.arguments ?? call.args ?? {}))
-                }
+                  arguments: JSON.stringify(
+                    argumentsObject(fn.args ?? fn.arguments ?? call.args ?? {}),
+                  ),
+                },
               });
             }
             // Never execute calls or wait for a turn boundary: BLOCKING waits for
@@ -924,7 +1136,7 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
               text: text || null,
               toolCalls,
               usage,
-              finishReason: "tool_calls"
+              finishReason: "tool_calls",
             });
           }
           if (!content) return;
@@ -933,29 +1145,40 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
             return succeed({
               text,
               usage,
-              finishReason: "stop"
+              finishReason: "stop",
             });
           }
           // A turn boundary can precede further background processing in 3.8.
-          if (content.turnComplete && content.interactionStatus !== "IN_PROGRESS") {
+          if (
+            content.turnComplete &&
+            content.interactionStatus !== "IN_PROGRESS"
+          ) {
             const reason = content.turnCompleteReason;
-            const filtered = reason && !["TURN_COMPLETE_REASON_UNSPECIFIED", "NEED_MORE_INPUT", "MALFORMED_FUNCTION_CALL"].includes(reason);
+            const filtered =
+              reason &&
+              ![
+                "TURN_COMPLETE_REASON_UNSPECIFIED",
+                "NEED_MORE_INPUT",
+                "MALFORMED_FUNCTION_CALL",
+              ].includes(reason);
             // Return whatever was recovered, including an empty transcript.
             succeed({
               text: stringify(text ?? ""),
               usage,
-              finishReason: filtered ? "content_filter" : "stop"
+              finishReason: filtered ? "content_filter" : "stop",
             });
           }
         } catch (e) {
           text += `\nerror:${stringify(e instanceof Error ? String(e) : e)}\n`;
         }
       };
-      socket.addEventListener("message", event => handleMessage(event));
+      socket.addEventListener("message", (event) => handleMessage(event));
       socket.accept();
-      socket.send(JSON.stringify({
-        setup: payload.setup
-      }));
+      socket.send(
+        JSON.stringify({
+          setup: payload.setup,
+        }),
+      );
     });
   };
   try {
@@ -981,65 +1204,93 @@ export default {
     try {
       const pathname = new URL(request.url).pathname;
       const apiKey = geminiKey(request);
-      if (pathname === "/v1/models" && request.method === "GET") return json({
-        object: "list",
-        data: [{
-          id: MODEL,
-          object: "model",
-          created: 0,
-          owned_by: "google"
-        }]
-      });
+      if (pathname === "/v1/models" && request.method === "GET")
+        return json({
+          object: "list",
+          data: [
+            {
+              id: MODEL,
+              object: "model",
+              created: 0,
+              owned_by: "google",
+            },
+          ],
+        });
       const payload = translate(await readJson(request));
       const timeout = Number(env.TIMEOUT_MS || 180000);
-      const result = await completeLive(payload, apiKey, request.signal, timeout);
+      const result = await completeLive(
+        payload,
+        apiKey,
+        request.signal,
+        timeout,
+      );
       const response = {
         id: `chatcmpl-${crypto.randomUUID()}`,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
         model: payload.setup.model.slice("models/".length),
-        choices: [{
-          index: 0,
-          message: {
-            role: "assistant",
-            content: result.text,
-            ...(result.toolCalls ? {
-              tool_calls: result.toolCalls
-            } : {})
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: result.text,
+              ...(result.toolCalls
+                ? {
+                    tool_calls: result.toolCalls,
+                  }
+                : {}),
+            },
+            finish_reason: result.finishReason,
+            logprobs: null,
           },
-          finish_reason: result.finishReason,
-          logprobs: null
-        }],
+        ],
       };
       const u = result.usage;
-      if (u && [u.promptTokenCount, u.responseTokenCount, u.totalTokenCount].every(Number.isInteger)) {
+      if (
+        u &&
+        [u.promptTokenCount, u.responseTokenCount, u.totalTokenCount].every(
+          Number.isInteger,
+        )
+      ) {
         response.usage = {
           prompt_tokens: u.promptTokenCount,
           completion_tokens: u.responseTokenCount,
-          total_tokens: u.totalTokenCount
+          total_tokens: u.totalTokenCount,
         };
       }
       // These statuses cannot carry a JSON body; retain the upstream code in metadata.
       const status = result.status ?? 200;
-      if (status < 200 || [204, 205, 304].includes(status)) response.upstream_status = status;
-      return json(response, response.upstream_status === undefined ? status : 502);
+      if (status < 200 || [204, 205, 304].includes(status))
+        response.upstream_status = status;
+      return json(
+        response,
+        response.upstream_status === undefined ? status : 502,
+      );
     } catch (error) {
       const status = error instanceof ApiError ? error.status : 500;
-      return json({
-        id: `chatcmpl-${randId()}`,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: MODEL,
-        choices: [{
-          index: 0,
-          message: {
-            role: "assistant",
-            content: stringify(error instanceof Error ? String(error) : error)
-          },
-          finish_reason: "stop",
-          logprobs: null
-        }]
-      }, status);
+      return json(
+        {
+          id: `chatcmpl-${randId()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: MODEL,
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: stringify(
+                  error instanceof Error ? String(error) : error,
+                ),
+              },
+              finish_reason: "stop",
+              logprobs: null,
+            },
+          ],
+        },
+        status,
+      );
     }
   },
 };
