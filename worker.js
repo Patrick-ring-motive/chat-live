@@ -612,10 +612,9 @@ export function translate(body) {
   const pending = new Map();
   const pendingAsText = () => {
     for (const turn of turns) {
-      turn.parts = turn.parts.map(part => part.functionCall && pending.has(part.functionCall.id) ?
-        {
-          text: `tool_call:${stringify(part.functionCall)}`
-        } : part);
+      turn.parts = turn.parts.map(part => part.functionCall && pending.has(part.functionCall.id) ? {
+        text: `tool_call:${stringify(part.functionCall)}`
+      } : part);
     }
     pending.clear();
   };
