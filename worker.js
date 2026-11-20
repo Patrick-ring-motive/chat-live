@@ -1,6 +1,6 @@
 import * as util from 'node:util';
 
-const overwrite = (obj, prop, val)=> {
+const overwrite = (obj, prop, val) => {
   Object.defineProperty(obj, prop, {
     value: val,
     writable: true,
@@ -10,23 +10,23 @@ const overwrite = (obj, prop, val)=> {
   return obj;
 };
 
-const assign = (object,key,value) =>{
-  try{
+const assign = (object, key, value) => {
+  try {
     object[key] = value;
-  }catch{
-    try{
+  } catch {
+    try {
       overwrite(object, key, value);
-    }catch{}
+    } catch {}
   }
   return object;
 };
 
-const assignAll = (target,...srcs)=>{
-  for(const src of srcs) {
+const assignAll = (target, ...srcs) => {
+  for (const src of srcs) {
     for (const key in src) {
       assign(target, key, src[key]);
     }
-    for(const key of Reflect.ownKeys(src)) {
+    for (const key of Reflect.ownKeys(src)) {
       assign(target, key, src[key]);
     }
   }
@@ -422,7 +422,6 @@ async function $text(res) {
   }
 }
 
-
 const toObj = obj => {
   if (isString(obj)) {
     obj = assignAll(Object(obj), Object(parseTruncatedJSON(obj)));
@@ -446,7 +445,6 @@ const toArr = arr => {
   }
   return arr;
 };
-
 
 const tryB64 = str => {
   try {
@@ -510,7 +508,6 @@ async function readJson(message) {
   const text = await $text(message);
   return parseTruncatedJSON(text);
 }
-
 
 const object = value => value !== null && typeof value === "object" && !isArray(value);
 const functionName = value => isString(value) && value.trim().length > 0;
@@ -615,13 +612,17 @@ export function translate(body) {
   const pending = new Map();
   const pendingAsText = () => {
     for (const turn of turns) {
-      turn.parts = turn.parts.map(part => part.functionCall && pending.has(part.functionCall.id)
-        ? { text: `tool_call:${stringify(part.functionCall)}` } : part);
+      turn.parts = turn.parts.map(part => part.functionCall && pending.has(part.functionCall.id) ?
+        {
+          text: `tool_call:${stringify(part.functionCall)}`
+        } : part);
     }
     pending.clear();
   };
   for (const originalMessage of toArr(body.messages ?? body ?? [])) {
-    const message = { ...originalMessage };
+    const message = {
+      ...originalMessage
+    };
     if (message.function_call != null) {
       if (!message.tool_calls?.length) {
         message.tool_calls = [{
@@ -640,7 +641,9 @@ export function translate(body) {
       message.role = 'user';
     }
     if (message.audio != null) {
-      message.content = [...textParts(message.content), { text: `audio:${stringify(message.audio)}` }]
+      message.content = [...textParts(message.content), {
+          text: `audio:${stringify(message.audio)}`
+        }]
         .map(part => part.text).join("\n");
       delete message.audio;
     }
@@ -654,7 +657,12 @@ export function translate(body) {
       }
       const name = pending.get(message.tool_call_id);
       if (!name) {
-        turns.push({ role: "user", parts: [{ text: `tool_result:${stringify(message)}` }] });
+        turns.push({
+          role: "user",
+          parts: [{
+            text: `tool_result:${stringify(message)}`
+          }]
+        });
         continue;
       }
       // A known ID supplies the name; never guess a match for an orphaned ID.
@@ -687,7 +695,9 @@ export function translate(body) {
     for (const call of message.tool_calls ?? []) {
       if (!object(call) || (call.type != null && call.type !== "function") || !object(call.function) ||
         !callId(call.id) || ids.has(call.id) || !functionName(call.function.name)) {
-        parts.push({ text: `tool_call:${stringify(call)}` });
+        parts.push({
+          text: `tool_call:${stringify(call)}`
+        });
         continue;
       }
       ids.add(call.id);
@@ -796,7 +806,10 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
     if (response.status !== 101 || !socket) {
       availableText = await $text(response);
       if (!availableText.trim()) availableText = response.statusText || stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
-      return { ...partialResult(`HTTP ${response.status}`), status: response.status };
+      return {
+        ...partialResult(`HTTP ${response.status}`),
+        status: response.status
+      };
     }
     socket.binaryType = "arraybuffer";
     return await new Promise((resolve, reject) => {
@@ -918,7 +931,11 @@ export async function completeLive(payload, apiKey, signal, timeoutMs = 180000, 
           if (!content) return;
           if (content.interrupted) {
             // Return partial output; the finally block closes the socket normally.
-            return succeed({ text, usage, finishReason: "stop" });
+            return succeed({
+              text,
+              usage,
+              finishReason: "stop"
+            });
           }
           // A turn boundary can precede further background processing in 3.8.
           if (content.turnComplete && content.interactionStatus !== "IN_PROGRESS") {
