@@ -159,9 +159,9 @@ function parseTruncatedJSON(text) {
         };
       if (char !== backslash) {
         chars.push(
-          char.charCodeAt(0) < 0x20
-            ? String.fromCharCode(char.charCodeAt(0))
-            : char,
+          char.charCodeAt(0) < 0x20 ?
+          String.fromCharCode(char.charCodeAt(0)) :
+          char,
         );
         continue;
       }
@@ -307,11 +307,11 @@ function parseTruncatedJSON(text) {
       ) {
         // Structural openers in a key slot are literal one-character keys.
         frame.key =
-          char === '"'
-            ? readString().value
-            : char === "{" || char === "["
-              ? text[index++]
-              : readToken();
+          char === '"' ?
+          readString().value :
+          char === "{" || char === "[" ?
+          text[index++] :
+          readToken();
         frame.state = "colon";
         continue;
       }
@@ -362,7 +362,10 @@ async function bestEffortResponse(response) {
     const resilientStream = new ReadableStream({
       async pull(controller) {
         try {
-          const { done, value } = await originalReader.read();
+          const {
+            done,
+            value
+          } = await originalReader.read();
 
           if (done == true || (isNullish(done) && isNullish(value))) {
             Q(() => controller.close());
@@ -416,7 +419,10 @@ async function $bytes(res) {
     reader = res?.body?.getReader?.();
     if (reader) {
       while (true) {
-        const { done, value } = await reader.read();
+        const {
+          done,
+          value
+        } = await reader.read();
         if (done == true || (isNullish(done) && isNullish(value))) {
           break;
         }
@@ -492,13 +498,13 @@ const concat = (parts) => {
 };
 
 const base64ToBytes = (x) =>
-  instanceOf(x, Uint8Array)
-    ? x
-    : concat(
-        stringify(x)
-          .split(/([\w+/=-]{4,})/)
-          .map((s, i) => (i % 2 ? tryB64(s) : encode(s))),
-      );
+  instanceOf(x, Uint8Array) ?
+  x :
+  concat(
+    stringify(x)
+    .split(/([\w+/=-]{4,})/)
+    .map((s, i) => (i % 2 ? tryB64(s) : encode(s))),
+  );
 
 const fetchResponse = async (...args) => {
   try {
@@ -554,7 +560,9 @@ const functionName = (value) => isString(value) && value.trim().length > 0;
 const callId = functionName;
 // Bound even ignored metadata without recursion or forwarding it upstream.
 function bodyDepth(value) {
-  const stack = [[value, 0]];
+  const stack = [
+    [value, 0]
+  ];
   while (stack.length) {
     const [node, depth] = stack.pop();
     if (node && typeof node === "object") {
@@ -568,11 +576,9 @@ function bodyDepth(value) {
 function textParts(content) {
   if (content == null) return [];
   if (isString(content))
-    return [
-      {
-        text: content,
-      },
-    ];
+    return [{
+      text: content,
+    }, ];
   return toArr(content).map((part) => ({
     text: stringify(part?.text ?? part),
   }));
@@ -595,13 +601,13 @@ function toolData(value, param, wrapArguments = false) {
   }
   if (wrapArguments)
     value =
-      value === undefined
-        ? {}
-        : object(value)
-          ? value
-          : {
-              value,
-            };
+    value === undefined ?
+    {} :
+    object(value) ?
+    value :
+    {
+      value,
+    };
   let count = 0;
 
   function copy(value, depth) {
@@ -622,12 +628,12 @@ function parametersSchema(value) {
   const schema = toolData(value, "tools");
   // Like translateRequest in chat-interactions, do not impose type:object or
   // rewrite schema keywords. Only non-schema roots use the empty-schema fallback.
-  return object(schema) || typeof schema === "boolean"
-    ? schema
-    : {
-        type: "object",
-        properties: {},
-      };
+  return object(schema) || typeof schema === "boolean" ?
+    schema :
+    {
+      type: "object",
+      properties: {},
+    };
 }
 
 function argumentsObject(value) {
@@ -640,9 +646,9 @@ function argumentsObject(value) {
 export function translate(body) {
   body = Object(body);
   bodyDepth(body);
-  const model = isString(body.model)
-    ? body.model.trim().replace(/^models\//, "") || MODEL
-    : MODEL;
+  const model = isString(body.model) ?
+    body.model.trim().replace(/^models\//, "") || MODEL :
+    MODEL;
   body.messages = toArr(body.messages ?? body);
   const declarations = [];
   const names = new Set();
@@ -654,11 +660,11 @@ export function translate(body) {
       names.add(fn.name);
       declarations.push({
         name: fn.name,
-        ...(isString(fn.description)
-          ? {
-              description: fn.description,
-            }
-          : {}),
+        ...(isString(fn.description) ?
+          {
+            description: fn.description,
+          } :
+          {}),
         parametersJsonSchema,
         behavior: "BLOCKING",
       });
@@ -671,11 +677,11 @@ export function translate(body) {
   const pendingAsText = () => {
     for (const turn of turns) {
       turn.parts = turn.parts.map((part) =>
-        part.functionCall && pending.has(part.functionCall.id)
-          ? {
-              text: `tool_call:${stringify(part.functionCall)}`,
-            }
-          : part,
+        part.functionCall && pending.has(part.functionCall.id) ?
+        {
+          text: `tool_call:${stringify(part.functionCall)}`,
+        } :
+        part,
       );
     }
     pending.clear();
@@ -686,13 +692,11 @@ export function translate(body) {
     };
     if (message.function_call != null) {
       if (!message.tool_calls?.length) {
-        message.tool_calls = [
-          {
-            id: `call_${randId()}`,
-            type: "function",
-            function: message.function_call,
-          },
-        ];
+        message.tool_calls = [{
+          id: `call_${randId()}`,
+          type: "function",
+          function: message.function_call,
+        }, ];
       }
       message.role = "assistant";
       delete message.function_call;
@@ -709,11 +713,11 @@ export function translate(body) {
     }
     if (message.audio != null) {
       message.content = [
-        ...textParts(message.content),
-        {
-          text: `audio:${stringify(message.audio)}`,
-        },
-      ]
+          ...textParts(message.content),
+          {
+            text: `audio:${stringify(message.audio)}`,
+          },
+        ]
         .map((part) => part.text)
         .join("\n");
       delete message.audio;
@@ -732,11 +736,9 @@ export function translate(body) {
       if (!name) {
         turns.push({
           role: "user",
-          parts: [
-            {
-              text: `tool_result:${stringify(message)}`,
-            },
-          ],
+          parts: [{
+            text: `tool_result:${stringify(message)}`,
+          }, ],
         });
         continue;
       }
@@ -745,8 +747,7 @@ export function translate(body) {
       if (isString(result)) {
         result = parseTruncatedJSON(result);
       }
-      result = toolData(
-        {
+      result = toolData({
           result,
         },
         "messages",
@@ -755,11 +756,11 @@ export function translate(body) {
         functionResponse: {
           id: message.tool_call_id,
           name,
-          response: object(result)
-            ? result
-            : {
-                result,
-              },
+          response: object(result) ?
+            result :
+            {
+              result,
+            },
         },
       };
       if (turns.at(-1)?.parts[0]?.functionResponse)
@@ -811,22 +812,22 @@ export function translate(body) {
   if (turns.at(-1)?.role !== "user")
     turns.push({
       role: "user",
-      parts: [
-        {
-          text: "Continue.",
-        },
-      ],
+      parts: [{
+        text: "Continue.",
+      }, ],
     });
   const generationConfig = {
     responseModalities: ["AUDIO"],
   };
   if (/thinking/i.test(model)) {
-    generationConfig.thinkingConfig = { thinkingLevel: "HIGH" };
+    generationConfig.thinkingConfig = {
+      thinkingLevel: "HIGH"
+    };
   }
   for (const [source, target, maximum] of [
-    ["temperature", "temperature", 2],
-    ["top_p", "topP", 1],
-  ]) {
+      ["temperature", "temperature", 2],
+      ["top_p", "topP", 1],
+    ]) {
     const value = numeric(body[source]);
     if (value !== undefined)
       generationConfig[target] = Math.min(maximum, Math.max(0, value));
@@ -848,11 +849,9 @@ export function translate(body) {
     };
   // none is enforced by withholding declarations, not an unverified toolConfig.
   if (declarations.length && body.tool_choice !== "none")
-    setup.tools = [
-      {
-        functionDeclarations: declarations,
-      },
-    ];
+    setup.tools = [{
+      functionDeclarations: declarations,
+    }, ];
   if (turns.length > 1)
     setup.historyConfig = {
       initialHistoryInClientContent: true,
@@ -873,30 +872,49 @@ export async function completeLive(
 ) {
   const started = Date.now();
   const first = await completeLiveAttempt(payload, apiKey, signal, timeoutMs, fetchImpl);
-  const { unsupportedBlocking, ...result } = first;
+  const {
+    unsupportedBlocking,
+    ...result
+  } = first;
   const remaining = timeoutMs - (Date.now() - started);
   if (!unsupportedBlocking || signal.aborted || remaining <= 0) return result;
 
   const asText = (part) => {
-    if (part.functionCall != null) return { text: `tool_call:${stringify(part.functionCall)}` };
-    if (part.functionResponse != null) return { text: `tool_result:${stringify(part.functionResponse)}` };
+    if (part.functionCall != null) return {
+      text: `tool_call:${stringify(part.functionCall)}`
+    };
+    if (part.functionResponse != null) return {
+      text: `tool_result:${stringify(part.functionResponse)}`
+    };
     return part;
   };
-  const { tools, toolConfig, ...setup } = payload.setup;
+  const {
+    tools,
+    toolConfig,
+    ...setup
+  } = payload.setup;
   setup.systemInstruction = {
     ...setup.systemInstruction,
     parts: [
       ...(setup.systemInstruction?.parts ?? []).map(asText),
-      { text: `Tools are unavailable in this session. Treat these definitions and tool history as text only; do not claim to execute tools.\nTool definitions:${stringify(tools ?? [])}` },
+      {
+        text: `Tools are unavailable in this session. Treat these definitions and tool history as text only; do not claim to execute tools.\nTool definitions:${stringify(tools ?? [])}`
+      },
     ],
   };
   const retry = await completeLiveAttempt({
     ...payload,
     setup,
-    turns: payload.turns.map(turn => ({ ...turn, parts: turn.parts.map(asText) })),
+    turns: payload.turns.map(turn => ({
+      ...turn,
+      parts: turn.parts.map(asText)
+    })),
     historyCallIds: [],
   }, apiKey, signal, remaining, fetchImpl);
-  const { unsupportedBlocking: ignored, ...retriedResult } = retry;
+  const {
+    unsupportedBlocking: ignored,
+    ...retriedResult
+  } = retry;
   return retriedResult;
 }
 
@@ -915,11 +933,11 @@ async function completeLiveAttempt(
   let usage;
   let availableText = "";
   const partialResult = (error) => ({
-    text: text.trim()
-      ? text
-      : availableText.trim()
-        ? availableText
-        : `error:${stringify(error instanceof Error ? String(error) : error)}`,
+    text: text.trim() ?
+      text :
+      availableText.trim() ?
+      availableText :
+      `error:${stringify(error instanceof Error ? String(error) : error)}`,
     usage,
     status: error instanceof ApiError ? error.status : 502,
     finishReason: "stop",
@@ -961,8 +979,8 @@ async function completeLiveAttempt(
       availableText = await $text(response);
       if (!availableText.trim())
         availableText =
-          response.statusText ||
-          stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
+        response.statusText ||
+        stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
       return {
         ...partialResult(`HTTP ${response.status}`),
         status: response.status,
@@ -989,7 +1007,10 @@ async function completeLiveAttempt(
         if (settled || controller.signal.aborted) return;
         const message = `Gemini Live closed before completion (code ${event.code}). ${event.reason || String(event)}`.trim();
         if (event.code === 1007 || /BLOCKING function calls are not supported for this model/i.test(event.reason)) {
-          return succeed({ ...partialResult(message), unsupportedBlocking: true });
+          return succeed({
+            ...partialResult(message),
+            unsupportedBlocking: true
+          });
         }
         fail(message);
       });
@@ -997,15 +1018,15 @@ async function completeLiveAttempt(
         if (settled || controller.signal.aborted) return;
         try {
           if (!replay)
-            bytes += isString(event.data)
-              ? new TextEncoder().encode(event.data).byteLength
-              : event.data.byteLength;
+            bytes += isString(event.data) ?
+            new TextEncoder().encode(event.data).byteLength :
+            event.data.byteLength;
           const message = JSON.parse(
-            isString(event.data)
-              ? event.data
-              : new TextDecoder("utf-8", {
-                  fatal: true,
-                }).decode(event.data),
+            isString(event.data) ?
+            event.data :
+            new TextDecoder("utf-8", {
+              fatal: true,
+            }).decode(event.data),
           );
           if (message.usageMetadata) usage = message.usageMetadata;
           if (
@@ -1030,9 +1051,9 @@ async function completeLiveAttempt(
               socket.send(
                 JSON.stringify({
                   clientContent: {
-                    turns: toolResults
-                      ? payload.turns
-                      : payload.turns.slice(0, -1),
+                    turns: toolResults ?
+                      payload.turns :
+                      payload.turns.slice(0, -1),
                     turnComplete: false,
                   },
                 }),
@@ -1040,9 +1061,9 @@ async function completeLiveAttempt(
               socket.send(
                 JSON.stringify({
                   realtimeInput: {
-                    text: toolResults
-                      ? "Continue from the supplied tool results and answer the preceding request."
-                      : last.parts.map((part) => part.text).join("\n"),
+                    text: toolResults ?
+                      "Continue from the supplied tool results and answer the preceding request." :
+                      last.parts.map((part) => part.text).join("\n"),
                   },
                 }),
               );
@@ -1084,9 +1105,9 @@ async function completeLiveAttempt(
             text += content.outputTranscription.text;
           if (message.toolCall || embeddedCalls.length) {
             const calls = [
-              ...(message.toolCall
-                ? toArr(message.toolCall.functionCalls)
-                : []),
+              ...(message.toolCall ?
+                toArr(message.toolCall.functionCalls) :
+                []),
               ...embeddedCalls,
             ];
             const names = new Set(
@@ -1103,21 +1124,21 @@ async function completeLiveAttempt(
               if (!names.has(name)) {
                 const matches = [...names].filter(
                   (candidate) =>
-                    isString(candidate) &&
-                    candidate.toLowerCase() === name.toLowerCase(),
+                  isString(candidate) &&
+                  candidate.toLowerCase() === name.toLowerCase(),
                 );
                 if (name && matches.length === 1) name = matches[0];
                 else if (!name) {
                   const available = [...names].filter(functionName);
                   name =
-                    available.length === 1
-                      ? available[0]
-                      : `unknown_tool_${toolCalls.length + 1}`;
+                    available.length === 1 ?
+                    available[0] :
+                    `unknown_tool_${toolCalls.length + 1}`;
                 }
               }
-              const baseId = callId(call.id)
-                ? String(call.id)
-                : `call_${randId()}`;
+              const baseId = callId(call.id) ?
+                String(call.id) :
+                `call_${randId()}`;
               let id = baseId;
               for (let suffix = 1; ids.has(id); suffix++)
                 id = `${baseId}_${suffix}`;
@@ -1210,14 +1231,12 @@ export default {
       if (pathname === "/v1/models" && request.method === "GET")
         return json({
           object: "list",
-          data: [
-            {
-              id: MODEL,
-              object: "model",
-              created: 0,
-              owned_by: "google",
-            },
-          ],
+          data: [{
+            id: MODEL,
+            object: "model",
+            created: 0,
+            owned_by: "google",
+          }, ],
         });
       const payload = translate(await readJson(request));
       const timeout = Number(env.TIMEOUT_MS || 180000);
@@ -1232,27 +1251,24 @@ export default {
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
         model: payload.setup.model.slice("models/".length),
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: result.text,
-              ...(result.toolCalls
-                ? {
-                    tool_calls: result.toolCalls,
-                  }
-                : {}),
-            },
-            finish_reason: result.finishReason,
-            logprobs: null,
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: result.text,
+            ...(result.toolCalls ?
+              {
+                tool_calls: result.toolCalls,
+              } :
+              {}),
           },
-        ],
+          finish_reason: result.finishReason,
+          logprobs: null,
+        }, ],
       };
       const u = result.usage;
       if (
-        u &&
-        [u.promptTokenCount, u.responseTokenCount, u.totalTokenCount].every(
+        u && [u.promptTokenCount, u.responseTokenCount, u.totalTokenCount].every(
           Number.isInteger,
         )
       ) {
@@ -1272,25 +1288,22 @@ export default {
       );
     } catch (error) {
       const status = error instanceof ApiError ? error.status : 500;
-      return json(
-        {
+      return json({
           id: `chatcmpl-${randId()}`,
           object: "chat.completion",
           created: Math.floor(Date.now() / 1000),
           model: MODEL,
-          choices: [
-            {
-              index: 0,
-              message: {
-                role: "assistant",
-                content: stringify(
-                  error instanceof Error ? String(error) : error,
-                ),
-              },
-              finish_reason: "stop",
-              logprobs: null,
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: stringify(
+                error instanceof Error ? String(error) : error,
+              ),
             },
-          ],
+            finish_reason: "stop",
+            logprobs: null,
+          }, ],
         },
         status,
       );
