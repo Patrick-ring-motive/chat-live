@@ -601,11 +601,9 @@ function toolData(value, param, wrapArguments = false) {
   }
   if (wrapArguments)
     value =
-    value === undefined ?
-    {} :
+    value === undefined ? {} :
     object(value) ?
-    value :
-    {
+    value : {
       value,
     };
   let count = 0;
@@ -629,8 +627,7 @@ function parametersSchema(value) {
   // Like translateRequest in chat-interactions, do not impose type:object or
   // rewrite schema keywords. Only non-schema roots use the empty-schema fallback.
   return object(schema) || typeof schema === "boolean" ?
-    schema :
-    {
+    schema : {
       type: "object",
       properties: {},
     };
@@ -660,11 +657,9 @@ export function translate(body) {
       names.add(fn.name);
       declarations.push({
         name: fn.name,
-        ...(isString(fn.description) ?
-          {
-            description: fn.description,
-          } :
-          {}),
+        ...(isString(fn.description) ? {
+          description: fn.description,
+        } : {}),
         parametersJsonSchema,
         behavior: "BLOCKING",
       });
@@ -677,8 +672,7 @@ export function translate(body) {
   const pendingAsText = () => {
     for (const turn of turns) {
       turn.parts = turn.parts.map((part) =>
-        part.functionCall && pending.has(part.functionCall.id) ?
-        {
+        part.functionCall && pending.has(part.functionCall.id) ? {
           text: `tool_call:${stringify(part.functionCall)}`,
         } :
         part,
@@ -757,8 +751,7 @@ export function translate(body) {
           id: message.tool_call_id,
           name,
           response: object(result) ?
-            result :
-            {
+            result : {
               result,
             },
         },
@@ -934,10 +927,8 @@ async function completeLiveAttempt(
   let availableText = "";
   const partialResult = (error) => ({
     text: text.trim() ?
-      text :
-      availableText.trim() ?
-      availableText :
-      `error:${stringify(error instanceof Error ? String(error) : error)}`,
+      text : availableText.trim() ?
+      availableText : `error:${stringify(error instanceof Error ? String(error) : error)}`,
     usage,
     status: error instanceof ApiError ? error.status : 502,
     finishReason: "stop",
@@ -1052,8 +1043,7 @@ async function completeLiveAttempt(
                 JSON.stringify({
                   clientContent: {
                     turns: toolResults ?
-                      payload.turns :
-                      payload.turns.slice(0, -1),
+                      payload.turns : payload.turns.slice(0, -1),
                     turnComplete: false,
                   },
                 }),
@@ -1062,8 +1052,7 @@ async function completeLiveAttempt(
                 JSON.stringify({
                   realtimeInput: {
                     text: toolResults ?
-                      "Continue from the supplied tool results and answer the preceding request." :
-                      last.parts.map((part) => part.text).join("\n"),
+                      "Continue from the supplied tool results and answer the preceding request." : last.parts.map((part) => part.text).join("\n"),
                   },
                 }),
               );
@@ -1106,8 +1095,7 @@ async function completeLiveAttempt(
           if (message.toolCall || embeddedCalls.length) {
             const calls = [
               ...(message.toolCall ?
-                toArr(message.toolCall.functionCalls) :
-                []),
+                toArr(message.toolCall.functionCalls) : []),
               ...embeddedCalls,
             ];
             const names = new Set(
@@ -1256,11 +1244,9 @@ export default {
           message: {
             role: "assistant",
             content: result.text,
-            ...(result.toolCalls ?
-              {
-                tool_calls: result.toolCalls,
-              } :
-              {}),
+            ...(result.toolCalls ? {
+              tool_calls: result.toolCalls,
+            } : {}),
           },
           finish_reason: result.finishReason,
           logprobs: null,
