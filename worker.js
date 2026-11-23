@@ -646,17 +646,17 @@ export function translate(body) {
   body.messages = toArr(body.messages ?? body);
   const declarations = [];
   const names = new Set();
-  if (body.tools != null) {
-    body.tools = toArr(body.tools);
+  if (body?.tools != null) {
+    body.tools = toArr(body.tools).map(Object);
     for (const tool of body.tools) {
-      const fn = tool.function;
-      const parametersJsonSchema = parametersSchema(fn.parameters);
-      names.add(fn.name);
+      const fn = tool?.function;
+      const parametersJsonSchema = parametersSchema(fn?.parameters);
+      names.add(fn?.name);
       declarations.push({
-        name: fn.name,
-        ...(isString(fn.description)
+        name: fn?.name,
+        ...(isString(fn?.description)
           ? {
-              description: fn.description,
+              description: fn?.description,
             }
           : {}),
         parametersJsonSchema,
@@ -685,13 +685,13 @@ export function translate(body) {
     const message = {
       ...originalMessage,
     };
-    if (message.function_call != null) {
+    if (message?.function_call != null) {
       if (!message.tool_calls?.length) {
         message.tool_calls = [
           {
             id: `call_${randId()}`,
             type: "function",
-            function: message.function_call,
+            function: message?.function_call,
           },
         ];
       }
