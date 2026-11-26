@@ -1,5 +1,4 @@
 import * as util from "node:util";
-import { createLiveWebSocketOperations } from "./worker.websocket-review.js";
 
 const Q = (fn) => {
   try {
@@ -929,6 +928,350 @@ export function translate(body) {
     })),
     historyCallIds: [...ids],
   };
+}
+
+// Recovered from VS Code local history -2b1a2798/mKqv.js.
+// One absolute deadline covers upgrade, body reads, setup, output and one retry.
+// Dependencies remain injectable for lifecycle tests; production stays in this file.
+export function createLiveWebSocketOperations({
+  ENDPOINT, fetchResponse, ApiError, $text, stringify, isString,
+  toArr, toObj, functionName, callId, randId, argumentsObject,
+}) {
+const kill = (controller, reason) => {
+  reason = stringify(reason);
+  Q(() => controller?.abort?.(reason));
+  Q(() => controller?.cancel?.(reason)?.catch?.(() => {}));
+  Q(() => controller?.close?.(reason));
+};
+
+async function completeLive(
+  payload,
+  apiKey,
+  signal,
+  timeoutMs = 30000,
+  fetchImpl = fetchResponse,
+) {
+  const deadline = Date.now() + timeoutMs;
+  const first = await completeLiveAttempt(payload, apiKey, signal, fetchImpl, deadline);
+  const {
+    unsupportedBlocking,
+    ...result
+  } = first;
+  if (!unsupportedBlocking || signal.aborted || Date.now() >= deadline) return result;
+
+  const asText = (part) =>
+    part.functionCall != null ? { text: `tool_call:${stringify(part.functionCall)}` } :
+    part.functionResponse != null ? { text: `tool_result:${stringify(part.functionResponse)}` } :
+    part;
+  const {
+    tools,
+    toolConfig,
+    ...setup
+  } = payload.setup;
+  setup.systemInstruction = {
+    ...setup.systemInstruction,
+    parts: [
+      ...(setup.systemInstruction?.parts ?? []).map(asText),
+      {
+        text: `Tools are unavailable in this session. Treat these definitions and tool history as text only; do not claim to execute tools.\nTool definitions:${stringify(tools ?? [])}`
+      },
+    ],
+  };
+  const retry = await completeLiveAttempt({
+    ...payload,
+    setup,
+    turns: payload.turns.map(turn => ({
+      ...turn,
+      parts: turn.parts.map(asText)
+    })),
+    historyCallIds: [],
+  }, apiKey, signal, fetchImpl, deadline);
+  const {
+    unsupportedBlocking: ignored,
+    ...retriedResult
+  } = retry;
+  return retriedResult;
+}
+
+async function completeLiveAttempt(
+  payload,
+  apiKey,
+  signal,
+  fetchImpl,
+  deadline = Date.now() + 30000,
+) {
+  const controller = new AbortController();
+  const listeners = [];
+  const beforeSetup = [];
+  let settled = false;
+  let socket;
+  let text = "";
+  let usage;
+  let availableText = "";
+  const partialResult = (error) => ({
+    text: text.trim() ?
+      text : availableText.trim() ?
+      availableText : `error:${stringify(error)}`,
+    usage,
+    status: 200,
+    finishReason: "stop",
+  });
+  let resolvePending;
+  const cancelled = new Promise((resolve) => {
+    resolvePending = resolve;
+  });
+  const abort = (error) => {
+    if (settled) return;
+    settled = true;
+    resolvePending(partialResult(error));
+    kill(controller);
+  };
+  const closeSocket = () => Q(() => socket?.close?.(1000, "Request finished"));
+  const onAbort = () => abort(signal.reason ?? "Request aborted");
+  signal.addEventListener("abort", onAbort);
+  const timer = setTimeout(() => abort("Gemini Live deadline exceeded"), deadline - Date.now());
+  const work = async () => {
+    const response = await fetchImpl(ENDPOINT, {
+      headers: {
+        Upgrade: "websocket",
+        "x-goog-api-key": apiKey,
+      },
+      signal: controller.signal,
+    });
+    socket = response.webSocket;
+    if (settled) {
+      Q(() => socket?.accept?.());
+      closeSocket();
+      return;
+    }
+    if (response.status !== 101 || !socket) {
+      availableText = stringify(await $text(response));
+      if (!availableText.trim())
+        availableText =
+        response.statusText ||
+        stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
+      return partialResult(`HTTP ${response.status}`);
+    }
+    socket.binaryType = "arraybuffer";
+    return await new Promise((resolve) => {
+      let ready = false;
+      const succeed = (result) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      const fail = (message) => {
+        if (settled || controller?.signal?.aborted) return;
+        succeed(partialResult(message));
+      };
+      const send = (message) => {
+        if (settled) return false;
+        try {
+          socket.send(stringify(message));
+          return !settled;
+        } catch (error) {
+          fail(error);
+          return false;
+        }
+      };
+      const onError = (event) => fail(event?.message || String(event));
+      const onClose = (event) => {
+        if (settled) return;
+        const message = `Gemini Live closed before completion (code ${event?.code}). ${event?.reason || String(event)}`.trim();
+        if (event?.code === 1007 || /BLOCKING function calls are not supported for this model/i.test(event?.reason)) {
+          return succeed({
+            ...partialResult(message),
+            unsupportedBlocking: true
+          });
+        }
+        fail(message);
+      };
+      const handleMessage = (event, replay = false) => {
+        if (settled || controller.signal.aborted) return;
+        try {
+          const message = parseTruncatedJSON(
+            isString(event.data) ? event.data : decode(event.data),
+          );
+          if (message.usageMetadata) usage = message.usageMetadata;
+          if (
+            !replay &&
+            isString(message.serverContent?.outputTranscription?.text)
+          )
+            availableText += message.serverContent.outputTranscription.text;
+          if (message.error) return fail(message.error ?? stringify(message));
+          if (!ready && !message.setupComplete) {
+            beforeSetup.push(event);
+            return;
+          }
+          if (message.setupComplete && !ready) {
+            ready = true;
+            // HistoryConfig consumes clientContent without inference, even with
+            // turnComplete:true. Close the seed, then send the current text turn.
+            if (payload.setup.historyConfig?.initialHistoryInClientContent) {
+              if (!send({
+                clientContent: {
+                  turns: payload.turns.slice(0, -1),
+                  turnComplete: true
+                },
+              })) return;
+              if (!send({
+                realtimeInput: {
+                  text: payload.turns.at(-1).parts.map(part => part.text).join("\n")
+                },
+              })) return;
+            } else {
+              if (!send({
+                clientContent: {
+                  turns: payload.turns,
+                  turnComplete: true
+                },
+              })) return;
+            }
+            // Send input once, then process early frames in their arrival order.
+            const queued = beforeSetup.splice(0);
+            for (const earlyEvent of queued) {
+              handleMessage(earlyEvent, true);
+              if (settled || controller.signal.aborted) return;
+            }
+          }
+          if (message.usageMetadata) usage = message.usageMetadata;
+          if (message.toolCallCancellation) {
+            text += `\ntoolCallCancellation:${stringify(message.toolCallCancellation)}\n`;
+          }
+          const content = message.serverContent;
+          const embeddedCalls = [];
+          for (const part of toArr(content?.modelTurn?.parts ?? [])) {
+            if (part?.functionCall != null)
+              embeddedCalls.push(part.functionCall);
+            if (
+              part?.inlineData &&
+              !/^audio\/pcm(?:;|$)/i.test(part.inlineData.mimeType || "")
+            ) {
+              text += `inlineData:${stringify(part.inlineData)}\n`;
+            }
+            // Discard PCM audio and model text, which may contain thoughts or duplicate the transcript.
+          }
+          if (isString(content?.outputTranscription?.text))
+            text += content.outputTranscription.text;
+          if (message.toolCall || embeddedCalls.length) {
+            const calls = [
+              ...(message.toolCall ?
+                toArr(message.toolCall.functionCalls) : []),
+              ...embeddedCalls,
+            ];
+            const names = new Set(
+              payload.setup.tools?.flatMap((tool) =>
+                tool.functionDeclarations.map((fn) => fn.name),
+              ) || [],
+            );
+            const ids = new Set(payload.historyCallIds || []);
+            const toolCalls = [];
+            for (const rawCall of calls) {
+              const call = toObj(rawCall);
+              const fn = toObj(call.function ?? call.functionCall ?? call);
+              let name = stringify(fn.name ?? call.name ?? "").trim();
+              if (!names.has(name)) {
+                const matches = [...names].filter(
+                  (candidate) =>
+                  isString(candidate) &&
+                  candidate.toLowerCase() === name.toLowerCase(),
+                );
+                if (name && matches.length === 1) name = matches[0];
+                else if (!name) {
+                  const available = [...names].filter(functionName);
+                  name =
+                    available.length === 1 ?
+                    available[0] :
+                    `unknown_tool_${toolCalls.length + 1}`;
+                }
+              }
+              const baseId = callId(call.id) ?
+                String(call.id) :
+                `call_${randId()}`;
+              let id = baseId;
+              for (let suffix = 1; ids.has(id); suffix++)
+                id = `${baseId}_${suffix}`;
+              ids.add(id);
+              toolCalls.push({
+                id,
+                type: "function",
+                function: {
+                  name,
+                  arguments: JSON.stringify(
+                    argumentsObject(fn.args ?? fn.arguments ?? call.args ?? {}),
+                  ),
+                },
+              });
+            }
+            // Never execute calls or wait for a turn boundary: BLOCKING waits for
+            // the client's result, which arrives in a separate HTTP request.
+            return succeed({
+              text: null,
+              toolCalls,
+              usage,
+              finishReason: "tool_calls",
+            });
+          }
+          if (!content) return;
+          if (content.interrupted) {
+            // Return partial output; the finally block closes the socket normally.
+            return succeed({
+              text,
+              usage,
+              finishReason: "stop",
+            });
+          }
+          // A turn boundary can precede further background processing in 3.8.
+          if (
+            content.turnComplete &&
+            content.interactionStatus !== "IN_PROGRESS"
+          ) {
+            const reason = content.turnCompleteReason;
+            const filtered =
+              reason &&
+              ![
+                "TURN_COMPLETE_REASON_UNSPECIFIED",
+                "NEED_MORE_INPUT",
+                "MALFORMED_FUNCTION_CALL",
+              ].includes(reason);
+            // Return whatever was recovered, including an empty transcript.
+            succeed({
+              text: stringify(text ?? ""),
+              usage,
+              finishReason: filtered ? "content_filter" : "stop",
+            });
+          }
+        } catch (e) {
+          text += `\nerror:${stringify(e instanceof Error ? String(e) : e)}\n`;
+        }
+      };
+      const onMessage = (event) => handleMessage(event);
+      listeners.push(["error", onError], ["close", onClose], ["message", onMessage]);
+      for (const [type, listener] of listeners)
+        socket.addEventListener(type, listener);
+      socket.accept();
+      send({ setup: payload.setup });
+    });
+  };
+  try {
+    if (signal.aborted) onAbort();
+    if (Date.now() >= deadline) abort("Gemini Live deadline exceeded");
+    return await (settled ? cancelled : Promise.race([work(), cancelled]));
+  } catch (error) {
+    return partialResult(error);
+  } finally {
+    settled = true;
+    Q(() => clearTimeout(timer));
+    Q(() => signal?.removeEventListener?.("abort", onAbort));
+    for (const [type, listener] of listeners)
+      Q(() => socket?.removeEventListener?.(type, listener));
+    beforeSetup.length = 0;
+    kill(controller);
+    closeSocket();
+  }
+}
+
+return { completeLive, completeLiveAttempt };
 }
 
 export const { completeLive } = createLiveWebSocketOperations({
