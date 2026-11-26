@@ -298,12 +298,12 @@ function parseTruncatedJSON(text) {
       continue;
     }
 
-    if (frame) {
-      if (frame.state === "separator")
+    
+      if (frame?.state === "separator")
         frame.state = frame.kind === "array" ? "value" : "key";
       if (
-        frame.kind === "object" &&
-        (frame.state === "first" || frame.state === "key")
+        frame?.kind === "object" &&
+        (frame?.state === "first" || frame?.state === "key")
       ) {
         // Structural openers in a key slot are literal one-character keys.
         frame.key =
@@ -315,8 +315,10 @@ function parseTruncatedJSON(text) {
         frame.state = "colon";
         continue;
       }
-      if (frame.state === "colon") frame.state = "value";
-    }
+      if (frame?.state === "colon") {
+        frame.state = "value";
+      }
+  
 
     if (char === "{" || char === "[") {
       const value = char === "{" ? {} : [];
@@ -599,15 +601,10 @@ function toolData(value, param, wrapArguments = false) {
       value = parseTruncatedJSON(value, param);
     }
   }
-  if (wrapArguments)
-    value =
-    value === undefined ?
-    {} :
-    object(value) ?
-    value :
-    {
-      value,
-    };
+  if (wrapArguments){
+    value = {...Object(value),...{value}};
+  }
+  
   let count = 0;
 
   function copy(value, depth) {
@@ -723,9 +720,9 @@ export function translate(body) {
         .join("\n");
       delete message.audio;
     }
-    if (message.tool_calls != null) {
-      message.tool_calls = toArr(message.tool_calls);
-    }
+    
+    message.tool_calls &&= toArr(message.tool_calls);
+    
     if (message.role === "tool") {
       if (!callId(message.tool_call_id)) {
         const matches = [...pending].filter(
@@ -757,7 +754,7 @@ export function translate(body) {
             },
         },
       };
-      if (turns.at(-1)?.parts[0]?.functionResponse)
+      if (turns.at(-1)?.parts?.[0]?.functionResponse)
         turns.at(-1).parts.push(part);
       else
         turns.push({
@@ -767,7 +764,9 @@ export function translate(body) {
       pending.delete(message.tool_call_id);
       continue;
     }
-    if (!["system", "developer"].includes(message.role)) resolvedToolFollowup = false;
+    if (!/^system|developer$/.test(message.role)) {
+      resolvedToolFollowup = false;
+    }
     if (pending.size) pendingAsText();
     const parts = textParts(message.content);
     for (const call of message.tool_calls ?? []) {
@@ -794,7 +793,7 @@ export function translate(body) {
         },
       });
     }
-    if (["system", "developer"].includes(message.role)) {
+    if (/^system|developer$/.test(message.role)) {
       instructions.push(...parts);
     } else if (parts.length)
       turns.push({
@@ -870,8 +869,7 @@ export function translate(body) {
     }
     return part;
   };
-  if (setup.systemInstruction)
-    setup.systemInstruction.parts = setup.systemInstruction.parts.map(asText);
+  (setup?.systemInstruction??{}).parts = toArr(setup?.systemInstruction?.parts??[])?.map?.(asText)??[];
   return {
     setup,
     turns: turns.map((turn) => ({
@@ -1252,7 +1250,7 @@ export default {
         timeout,
       );
       const response = {
-        id: `chatcmpl-${crypto.randomUUID()}`,
+        id: `chatcmpl-${randId()}`,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
         model: payload.setup.model.slice("models/".length),
