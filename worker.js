@@ -298,27 +298,25 @@ function parseTruncatedJSON(text) {
       continue;
     }
 
-    
-      if (frame?.state === "separator")
-        frame.state = frame.kind === "array" ? "value" : "key";
-      if (
-        frame?.kind === "object" &&
-        (frame?.state === "first" || frame?.state === "key")
-      ) {
-        // Structural openers in a key slot are literal one-character keys.
-        frame.key =
-          char === '"' ?
-          readString().value :
-          char === "{" || char === "[" ?
-          text[index++] :
-          readToken();
-        frame.state = "colon";
-        continue;
-      }
-      if (frame?.state === "colon") {
-        frame.state = "value";
-      }
-  
+    if (frame?.state === "separator")
+      frame.state = frame.kind === "array" ? "value" : "key";
+    if (
+      frame?.kind === "object" &&
+      (frame?.state === "first" || frame?.state === "key")
+    ) {
+      // Structural openers in a key slot are literal one-character keys.
+      frame.key =
+        char === '"' ?
+        readString().value :
+        char === "{" || char === "[" ?
+        text[index++] :
+        readToken();
+      frame.state = "colon";
+      continue;
+    }
+    if (frame?.state === "colon") {
+      frame.state = "value";
+    }
 
     if (char === "{" || char === "[") {
       const value = char === "{" ? {} : [];
@@ -601,10 +599,15 @@ function toolData(value, param, wrapArguments = false) {
       value = parseTruncatedJSON(value, param);
     }
   }
-  if (wrapArguments){
-    value = {...Object(value),...{value}};
+  if (wrapArguments) {
+    value = {
+      ...Object(value),
+      ...{
+        value
+      }
+    };
   }
-  
+
   let count = 0;
 
   function copy(value, depth) {
@@ -626,8 +629,7 @@ function parametersSchema(value) {
   // Like translateRequest in chat-interactions, do not impose type:object or
   // rewrite schema keywords. Only non-schema roots use the empty-schema fallback.
   return object(schema) || typeof schema === "boolean" ?
-    schema :
-    {
+    schema : {
       type: "object",
       properties: {},
     };
@@ -657,11 +659,9 @@ export function translate(body) {
       names.add(fn?.name);
       declarations.push({
         name: fn?.name,
-        ...(isString(fn?.description) ?
-          {
-            description: fn?.description,
-          } :
-          {}),
+        ...(isString(fn?.description) ? {
+          description: fn?.description,
+        } : {}),
         parametersJsonSchema,
         behavior: "BLOCKING",
       });
@@ -675,8 +675,7 @@ export function translate(body) {
   const pendingAsText = () => {
     for (const turn of turns) {
       turn.parts = turn.parts.map((part) =>
-        part.functionCall && pending.has(part.functionCall.id) ?
-        {
+        part.functionCall && pending.has(part.functionCall.id) ? {
           text: `tool_call:${stringify(part.functionCall)}`,
         } :
         part,
@@ -720,9 +719,9 @@ export function translate(body) {
         .join("\n");
       delete message.audio;
     }
-    
+
     message.tool_calls &&= toArr(message.tool_calls);
-    
+
     if (message.role === "tool") {
       if (!callId(message.tool_call_id)) {
         const matches = [...pending].filter(
@@ -748,8 +747,7 @@ export function translate(body) {
           id: message.tool_call_id,
           name,
           response: object(result) ?
-            result :
-            {
+            result : {
               result,
             },
         },
@@ -869,7 +867,7 @@ export function translate(body) {
     }
     return part;
   };
-  (setup?.systemInstruction??{}).parts = toArr(setup?.systemInstruction?.parts??[])?.map?.(asText)??[];
+  (setup?.systemInstruction ?? {}).parts = toArr(setup?.systemInstruction?.parts ?? [])?.map?.(asText) ?? [];
   return {
     setup,
     turns: turns.map((turn) => ({
@@ -951,10 +949,8 @@ async function completeLiveAttempt(
   let availableText = "";
   const partialResult = (error) => ({
     text: text.trim() ?
-      text :
-      availableText.trim() ?
-      availableText :
-      `error:${stringify(error instanceof Error ? String(error) : error)}`,
+      text : availableText.trim() ?
+      availableText : `error:${stringify(error instanceof Error ? String(error) : error)}`,
     usage,
     status: error instanceof ApiError ? error.status : 502,
     finishReason: "stop",
@@ -1109,8 +1105,7 @@ async function completeLiveAttempt(
           if (message.toolCall || embeddedCalls.length) {
             const calls = [
               ...(message.toolCall ?
-                toArr(message.toolCall.functionCalls) :
-                []),
+                toArr(message.toolCall.functionCalls) : []),
               ...embeddedCalls,
             ];
             const names = new Set(
@@ -1259,11 +1254,9 @@ export default {
           message: {
             role: "assistant",
             content: result.text,
-            ...(result.toolCalls ?
-              {
-                tool_calls: result.toolCalls,
-              } :
-              {}),
+            ...(result.toolCalls ? {
+              tool_calls: result.toolCalls,
+            } : {}),
           },
           finish_reason: result.finishReason,
           logprobs: null,
