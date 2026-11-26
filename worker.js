@@ -93,7 +93,7 @@ const randId = () => {
 const stringify = (value) => {
   try {
     if (isString(value)) return String(value);
-    return String(JSON.stringify(value));
+    return String(JSON.stringify(flattenObject(value)));
   } catch {
     try {
       return String(value);
@@ -358,7 +358,7 @@ function _parseTruncatedJSON(text) {
 
 function parseTruncatedJSON(text) {
   text = stringify(text);
-  const json = parseTruncatedJSON(text);
+  const json = _parseTruncatedJSON(text);
   if(isArray(json) && !text.trim().startsWith('[')){
     let obj = {};
     if(json.some(isArray)){
@@ -602,7 +602,7 @@ async function readJson(message) {
   return parseTruncatedJSON(text);
 }
 
-const object = (value) =>
+const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !isArray(value);
 const functionName = (value) => isString(value) && value.trim().length > 0;
 const callId = functionName;
@@ -676,7 +676,7 @@ function parametersSchema(value) {
   const schema = toolData(value, "tools");
   // Like translateRequest in chat-interactions, do not impose type:object or
   // rewrite schema keywords. Only non-schema roots use the empty-schema fallback.
-  return object(schema) || typeof schema === "boolean" ?
+  return isPlainObject(schema) || typeof schema === "boolean" ?
     schema : {
       type: "object",
       properties: {},
@@ -794,7 +794,7 @@ export function translate(body) {
         functionResponse: {
           id: message.tool_call_id,
           name,
-          response: object(result) ?
+          response: isPlainObject(result) ?
             result : {
               result,
             },
@@ -817,9 +817,9 @@ export function translate(body) {
     const parts = textParts(message.content);
     for (const call of message.tool_calls ?? []) {
       if (
-        !object(call) ||
+        !isPlainObject(call) ||
         (call.type != null && call.type !== "function") ||
-        !object(call.function) ||
+        !isPlainObject(call.function) ||
         !callId(call.id) ||
         ids.has(call.id) ||
         !functionName(call.function.name)
