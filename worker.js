@@ -1,4 +1,12 @@
 import * as util from "node:util";
+import { createLiveWebSocketOperations } from "./worker.websocket-review.js";
+
+const Q = (fn) => {
+  try {
+    return fn();
+  } catch {}
+};
+
 
 const overwrite = (obj, prop, val) => {
   Object.defineProperty(obj, prop, {
@@ -14,9 +22,7 @@ const assign = (object, key, value) => {
   try {
     object[key] = value;
   } catch {
-    try {
-      overwrite(object, key, value);
-    } catch {}
+    Q(() => overwrite(object, key, value));
   }
   return object;
 };
@@ -61,34 +67,19 @@ const flattenArray = (arr) => {
   return assignAll({}, arr, ...arr.map(flattenObject));
 };
 
-const instanceOf = (value, constructor) => {
-  try {
-    return value instanceof constructor;
-  } catch {
-    return false;
-  }
-};
+const instanceOf = (value, constructor) =>
+  Q(() => value instanceof constructor) || false;
 
 const isString = (value) =>
   typeof value === "string" || instanceOf(value, String);
 
-const isArray = (value) => {
-  try {
-    return Array.isArray(value) || instanceOf(value, Array);
-  } catch {
-    return false;
-  }
-};
+const isArray = (value) =>
+  Q(() => Array.isArray(value) || instanceOf(value, Array)) || false;
 
 const isObject = (value) => typeof value === "object" && value !== null;
 
-const randId = () => {
-  try {
-    return crypto.randomUUID();
-  } catch {
-    return String(Math.random()).replace("0.", "");
-  }
-};
+const randId = () =>
+  Q(() => crypto.randomUUID()) ?? String(Math.random()).replace("0.", "");
 
 const stringify = (value) => {
   try {
@@ -113,26 +104,16 @@ const stringify = (value) => {
 
 const decoder = new TextDecoder();
 const _decode = decoder.decode.bind(decoder);
-const decode = bytes =>{
-  try{
-    return _decode(bytes);
-  }catch{}
-  try{
-    return _decode(new Uint8Array(bytes));
-  }catch{}
-  return stringify(bytes);
-};
+const decode = bytes =>
+  Q(() => _decode(bytes)) ??
+  Q(() => _decode(new Uint8Array(bytes))) ??
+  stringify(bytes);
 
 const encoder = new TextEncoder();
 const _encode = encoder.encode.bind(encoder);
-const encode = text =>{
-  try{
-    if(!isString(text)){
-      return new Uint8Array(text);
-    }
-  }catch{}
-  return _encode(stringify(text));
-};
+const encode = text =>
+  Q(() => !isString(text) ? new Uint8Array(text) : undefined) ??
+  _encode(stringify(text));
 
 function _parseTruncatedJSON(text) {
   text = stringify(text);
@@ -382,11 +363,6 @@ function parseTruncatedJSON(text) {
   return json;
 }
 
-const Q = (fn) => {
-  try {
-    return fn();
-  } catch {}
-};
 
 
 
@@ -924,344 +900,15 @@ export function translate(body) {
   };
 }
 
-export async function completeLive(
-  payload,
-  apiKey,
-  signal,
-  _unusedTimeoutMs = undefined, // Retained for existing callers passing fetchImpl fifth.
-  fetchImpl = fetchResponse,
-) {
-  const first = await completeLiveAttempt(payload, apiKey, signal, fetchImpl);
-  const {
-    unsupportedBlocking,
-    ...result
-  } = first;
-  if (!unsupportedBlocking || signal.aborted) return result;
-
-  const asText = (part) => {
-    if (part.functionCall != null) return {
-      text: `tool_call:${stringify(part.functionCall)}`
-    };
-    if (part.functionResponse != null) return {
-      text: `tool_result:${stringify(part.functionResponse)}`
-    };
-    return part;
-  };
-  const {
-    tools,
-    toolConfig,
-    ...setup
-  } = payload.setup;
-  setup.systemInstruction = {
-    ...setup.systemInstruction,
-    parts: [
-      ...(setup.systemInstruction?.parts ?? []).map(asText),
-      {
-        text: `Tools are unavailable in this session. Treat these definitions and tool history as text only; do not claim to execute tools.\nTool definitions:${stringify(tools ?? [])}`
-      },
-    ],
-  };
-  const retry = await completeLiveAttempt({
-    ...payload,
-    setup,
-    turns: payload.turns.map(turn => ({
-      ...turn,
-      parts: turn.parts.map(asText)
-    })),
-    historyCallIds: [],
-  }, apiKey, signal, fetchImpl);
-  const {
-    unsupportedBlocking: ignored,
-    ...retriedResult
-  } = retry;
-  return retriedResult;
-}
-
-async function completeLiveAttempt(
-  payload,
-  apiKey,
-  signal,
-  fetchImpl,
-) {
-  const controller = new AbortController();
-  let socket;
-  let onAbort;
-  let text = "";
-  let usage;
-  let availableText = "";
-  const partialResult = (error) => ({
-    text: text.trim() ?
-      text : availableText.trim() ?
-      availableText : `error:${stringify(error)}`,
-    usage,
-    status: error.status || 502,
-    finishReason: "stop",
-  });
-  let resolvePending;
-  const cancelled = new Promise((resolve) => {
-    resolvePending = resolve;
-  });
-  const abort = (error) => {
-    const result = partialResult(error);
-    if (text.trim() || availableText.trim()) result.status = 200;
-    resolvePending(result);
-    controller.abort();
-  };
-  onAbort = (event) => abort(new ApiError(499, stringify(event)));
-  signal.addEventListener("abort", onAbort, {
-    once: true,
-  });
-  const work = async () => {
-    const response = await fetchImpl(ENDPOINT, {
-      headers: {
-        Upgrade: "websocket",
-        "x-goog-api-key": apiKey,
-      },
-      signal: controller.signal,
-    });
-    socket = response.webSocket;
-    if (controller.signal.aborted) {
-      if (socket) {
-        socket.accept();
-        socket.close(1000, "Cancelled");
-      }
-    }
-    if (response.status !== 101 || !socket) {
-      availableText = await $text(response);
-      if (!availableText.trim())
-        availableText =
-        response.statusText ||
-        stringify(Object.fromEntries(response.headers?.entries?.() ?? []));
-      return {
-        ...partialResult(`HTTP ${response.status}`),
-        status: response.status,
-      };
-    }
-    socket.binaryType = "arraybuffer";
-    return await new Promise((resolve, reject) => {
-      let ready = false;
-      const beforeSetup = [];
-      let bytes = 0;
-      let settled = false;
-      const succeed = (result) => {
-        settled = true;
-        resolve(result);
-      };
-      const fail = (message) => {
-        if (settled || controller.signal.aborted) return;
-        succeed(partialResult(message));
-      };
-      socket.addEventListener("error", (event) =>
-        fail(event.message || String(event)),
-      );
-      socket.addEventListener("close", (event) => {
-        if (settled || controller.signal.aborted) return;
-        const message = `Gemini Live closed before completion (code ${event.code}). ${event.reason || String(event)}`.trim();
-        if (event.code === 1007 || /BLOCKING function calls are not supported for this model/i.test(event.reason)) {
-          return succeed({
-            ...partialResult(message),
-            unsupportedBlocking: true
-          });
-        }
-        fail(message);
-      });
-      const handleMessage = (event, replay = false) => {
-        if (settled || controller.signal.aborted) return;
-        try {
-          if (!replay)
-            bytes += isString(event.data) ?
-            new TextEncoder().encode(event.data).byteLength :
-            event.data.byteLength;
-          const message = JSON.parse(
-            isString(event.data) ?
-            event.data :
-            new TextDecoder("utf-8", {
-              fatal: true,
-            }).decode(event.data),
-          );
-          if (message.usageMetadata) usage = message.usageMetadata;
-          if (
-            !replay &&
-            isString(message.serverContent?.outputTranscription?.text)
-          )
-            availableText += message.serverContent.outputTranscription.text;
-          if (message.error) return fail(message.error ?? String(message));
-          if (!ready && !message.setupComplete) {
-            beforeSetup.push(event);
-            return;
-          }
-          if (message.setupComplete && !ready) {
-            ready = true;
-            // HistoryConfig consumes clientContent without inference, even with
-            // turnComplete:true. Close the seed, then send the current text turn.
-            if (payload.setup.historyConfig?.initialHistoryInClientContent) {
-              socket.send(JSON.stringify({
-                clientContent: {
-                  turns: payload.turns.slice(0, -1),
-                  turnComplete: true
-                },
-              }));
-              socket.send(JSON.stringify({
-                realtimeInput: {
-                  text: payload.turns.at(-1).parts.map(part => part.text).join("\n")
-                },
-              }));
-            } else {
-              socket.send(JSON.stringify({
-                clientContent: {
-                  turns: payload.turns,
-                  turnComplete: true
-                },
-              }));
-            }
-            // Send input once, then process early frames in their arrival order.
-            const queued = beforeSetup.splice(0);
-            for (const earlyEvent of queued) {
-              handleMessage(earlyEvent, true);
-              if (settled || controller.signal.aborted) return;
-            }
-          }
-          if (message.usageMetadata) usage = message.usageMetadata;
-          if (message.toolCallCancellation) {
-            text += `\ntoolCallCancellation:${stringify(message.toolCallCancellation)}\n`;
-          }
-          const content = message.serverContent;
-          const embeddedCalls = [];
-          for (const part of toArr(content?.modelTurn?.parts ?? [])) {
-            if (part?.functionCall != null)
-              embeddedCalls.push(part.functionCall);
-            if (
-              part?.inlineData &&
-              !/^audio\/pcm(?:;|$)/i.test(part.inlineData.mimeType || "")
-            ) {
-              text += `inlineData:${stringify(part.inlineData)}\n`;
-            }
-            // Discard PCM audio and model text, which may contain thoughts or duplicate the transcript.
-          }
-          if (isString(content?.outputTranscription?.text))
-            text += content.outputTranscription.text;
-          if (message.toolCall || embeddedCalls.length) {
-            const calls = [
-              ...(message.toolCall ?
-                toArr(message.toolCall.functionCalls) : []),
-              ...embeddedCalls,
-            ];
-            const names = new Set(
-              payload.setup.tools?.flatMap((tool) =>
-                tool.functionDeclarations.map((fn) => fn.name),
-              ) || [],
-            );
-            const ids = new Set(payload.historyCallIds || []);
-            const toolCalls = [];
-            for (const rawCall of calls) {
-              const call = toObj(rawCall);
-              const fn = toObj(call.function ?? call.functionCall ?? call);
-              let name = stringify(fn.name ?? call.name ?? "").trim();
-              if (!names.has(name)) {
-                const matches = [...names].filter(
-                  (candidate) =>
-                  isString(candidate) &&
-                  candidate.toLowerCase() === name.toLowerCase(),
-                );
-                if (name && matches.length === 1) name = matches[0];
-                else if (!name) {
-                  const available = [...names].filter(functionName);
-                  name =
-                    available.length === 1 ?
-                    available[0] :
-                    `unknown_tool_${toolCalls.length + 1}`;
-                }
-              }
-              const baseId = callId(call.id) ?
-                String(call.id) :
-                `call_${randId()}`;
-              let id = baseId;
-              for (let suffix = 1; ids.has(id); suffix++)
-                id = `${baseId}_${suffix}`;
-              ids.add(id);
-              toolCalls.push({
-                id,
-                type: "function",
-                function: {
-                  name,
-                  arguments: JSON.stringify(
-                    argumentsObject(fn.args ?? fn.arguments ?? call.args ?? {}),
-                  ),
-                },
-              });
-            }
-            // Never execute calls or wait for a turn boundary: BLOCKING waits for
-            // the client's result, which arrives in a separate HTTP request.
-            return succeed({
-              text: null,
-              toolCalls,
-              usage,
-              finishReason: "tool_calls",
-            });
-          }
-          if (!content) return;
-          if (content.interrupted) {
-            // Return partial output; the finally block closes the socket normally.
-            return succeed({
-              text,
-              usage,
-              finishReason: "stop",
-            });
-          }
-          // A turn boundary can precede further background processing in 3.8.
-          if (
-            content.turnComplete &&
-            content.interactionStatus !== "IN_PROGRESS"
-          ) {
-            const reason = content.turnCompleteReason;
-            const filtered =
-              reason &&
-              ![
-                "TURN_COMPLETE_REASON_UNSPECIFIED",
-                "NEED_MORE_INPUT",
-                "MALFORMED_FUNCTION_CALL",
-              ].includes(reason);
-            // Return whatever was recovered, including an empty transcript.
-            succeed({
-              text: stringify(text ?? ""),
-              usage,
-              finishReason: filtered ? "content_filter" : "stop",
-            });
-          }
-        } catch (e) {
-          text += `\nerror:${stringify(e instanceof Error ? String(e) : e)}\n`;
-        }
-      };
-      socket.addEventListener("message", (event) => handleMessage(event));
-      socket.accept();
-      socket.send(
-        JSON.stringify({
-          setup: payload.setup,
-        }),
-      );
-    });
-  };
-  try {
-    return await Promise.race([work(), cancelled]);
-  } catch (error) {
-    return partialResult(error);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-    controller.abort();
-    if (socket) {
-      try {
-        socket.close(1000, "Request finished");
-      } catch {
-        /* Already closed. */
-      }
-    }
-  }
-}
+export const { completeLive } = createLiveWebSocketOperations({
+  ENDPOINT, fetchResponse, ApiError, $text, stringify, isString,
+  toArr, toObj, functionName, callId, randId, argumentsObject,
+});
 
 export default {
   async fetch(request, env) {
     try {
-      const pathname = new URL(request.url).pathname;
+      const pathname = new URL(request?.url).pathname;
       const apiKey = geminiKey(request);
       if (pathname === "/v1/models" && request.method === "GET")
         return json({
@@ -1297,16 +944,12 @@ export default {
           logprobs: null,
         }, ],
       };
-      const u = result.usage;
-      if (
-        u && [u.promptTokenCount, u.responseTokenCount, u.totalTokenCount].every(
-          Number.isInteger,
-        )
-      ) {
+      const usage = result.usage;
+      if ([usage?.promptTokenCount, usage?.responseTokenCount, usage?.totalTokenCount].every(Number.isInteger)) {
         response.usage = {
-          prompt_tokens: u.promptTokenCount,
-          completion_tokens: u.responseTokenCount,
-          total_tokens: u.totalTokenCount,
+          prompt_tokens: usage.promptTokenCount,
+          completion_tokens: usage.responseTokenCount,
+          total_tokens: usage.totalTokenCount,
         };
       }
       // These statuses cannot carry a JSON body; retain the upstream code in metadata.
@@ -1315,10 +958,10 @@ export default {
         response.upstream_status = status;
       return json(
         response,
-        response.upstream_status === undefined ? status : 502,
+        response.upstream_status  ??= 502,
       );
     } catch (error) {
-      const status = error instanceof ApiError ? error.status : 500;
+      const status = error?.status ?? 500;
       return json({
           id: `chatcmpl-${randId()}`,
           object: "chat.completion",
@@ -1328,9 +971,7 @@ export default {
             index: 0,
             message: {
               role: "assistant",
-              content: stringify(
-                error instanceof Error ? String(error) : error,
-              ),
+              content: stringify(error),
             },
             finish_reason: "stop",
             logprobs: null,
