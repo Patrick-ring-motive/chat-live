@@ -6,7 +6,6 @@ const Q = (fn) => {
   } catch {}
 };
 
-
 const overwrite = (obj, prop, val) => {
   Object.defineProperty(obj, prop, {
     value: val,
@@ -52,14 +51,6 @@ const flattenObject = (req) => {
     }
   }
   return obj;
-};
-
-const flattenRequest = (req) => {
-  return {
-    ...flattenObject(req),
-    ...Object.fromEntries(req.headers.entries()),
-    ...Object.fromEntries(new URL(req.url).searchParams.entries()),
-  };
 };
 
 const flattenArray = (arr) => {
@@ -155,17 +146,9 @@ function _parseTruncatedJSON(text) {
     };
     while (index < text.length) {
       const char = text[index++];
-      if (char === '"')
-        return {
-          value: chars.join(""),
-          complete: true,
-        };
+      if (char === '"') return { value: chars.join(""), complete: true };
       if (char !== backslash) {
-        chars.push(
-          char.charCodeAt(0) < 0x20 ?
-          String.fromCharCode(char.charCodeAt(0)) :
-          char,
-        );
+        chars.push(char);
         continue;
       }
       if (index === text.length) {
@@ -178,10 +161,7 @@ function _parseTruncatedJSON(text) {
         for (let digit = 0; digit < 4; digit++) {
           if (index === text.length) {
             chars.push(backslash + "u" + hex);
-            return {
-              value: chars.join(""),
-              complete: false,
-            };
+            return { value: chars.join(""), complete: false };
           }
           if (!/[0-9a-fA-F]/.test(text[index])) break;
           hex += text[index++];
@@ -193,10 +173,7 @@ function _parseTruncatedJSON(text) {
         chars.push(backslash + escape);
       }
     }
-    return {
-      value: chars.join(""),
-      complete: false,
-    };
+    return { value: chars.join(""), complete: false };
   }
 
   function readToken() {
@@ -362,11 +339,6 @@ function parseTruncatedJSON(text) {
   return json;
 }
 
-
-
-
-
-
 const safeStatusText = (value) =>
   Q(() => {
     const bytes = encode(String(value)).slice(0, 200);
@@ -387,10 +359,7 @@ async function bestEffortResponse(response) {
     const resilientStream = new ReadableStream({
       async pull(controller) {
         try {
-          const {
-            done,
-            value
-          } = await originalReader.read();
+          const { done, value } = await originalReader.read();
 
           if (done == true || (isNullish(done) && isNullish(value))) {
             Q(() => controller.close());
@@ -444,10 +413,7 @@ async function $bytes(res) {
     reader = res?.body?.getReader?.();
     if (reader) {
       while (true) {
-        const {
-          done,
-          value
-        } = await reader.read();
+        const { done, value } = await reader.read();
         if (done == true || (isNullish(done) && isNullish(value))) {
           break;
         }
@@ -461,7 +427,6 @@ async function $bytes(res) {
   }
   return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }
-
 
 async function $text(res) {
   try {
@@ -498,37 +463,6 @@ const toArr = (arr) => {
   return arr;
 };
 
-const tryB64 = (str) => {
-  try {
-    str = str.replace(/=+$/, "").replaceAll("-", "+").replaceAll("_", "/");
-    return Uint8Array.from(
-      atob(str.padEnd(Math.ceil(str.length / 4) * 4, "=")),
-      (char) => char.charCodeAt(0),
-    );
-  } catch {
-    return encode(str);
-  }
-};
-
-const concat = (parts) => {
-  const outputs = new Uint8Array(
-    parts.reduce((length, part) => length + part.length, 0),
-  );
-  let output = 0;
-  for (const part of parts)
-    (outputs.set(part, output), (output += part.length));
-  return outputs;
-};
-
-const base64ToBytes = (x) =>
-  instanceOf(x, Uint8Array) ?
-  x :
-  concat(
-    stringify(x)
-    .split(/([\w+/=-]{4,})/)
-    .map((s, i) => (i % 2 ? tryB64(s) : encode(s))),
-  );
-
 const fetchResponse = async (...args) => {
   try {
     return await bestEffortFetch(...args);
@@ -544,8 +478,6 @@ const fetchResponse = async (...args) => {
 const ENDPOINT =
   "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const MODEL = "gemini-3.8-live";
-const MAX_BODY = 1024 * 1024;
-const MAX_UPSTREAM = 8 * 1024 * 1024;
 
 class ApiError extends Error {
   constructor(status, message, param = null) {
@@ -556,12 +488,7 @@ class ApiError extends Error {
 }
 
 const json = (value, status = 200) =>
-  Response.json(value, {
-    status,
-    headers: {
-      "Cache-Control": "no-store",
-    },
-  });
+  Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 
 function geminiKey(request) {
   const token = /^Bearer[ \t]+([^\s]+)$/i.exec(
@@ -582,10 +509,7 @@ const callId = functionName;
 
 function textParts(content) {
   if (content == null) return [];
-  if (isString(content))
-    return [{
-      text: content,
-    }, ];
+  if (isString(content)) return [{ text: content }];
   return toArr(content).map((part) => ({
     text: stringify(part?.text ?? part),
   }));
@@ -596,7 +520,7 @@ function numeric(value) {
   return Number.isFinite(number) ? number : undefined;
 }
 
-// Bound and copy all tool data, including unknown schema keywords and defaults.
+// Copy all tool data, including unknown schema keywords and defaults.
 // No mutation, evaluation, reference resolution, or instance validation.
 function toolData(value, param, wrapArguments = false) {
   if (isString(value)) {
@@ -610,20 +534,15 @@ function toolData(value, param, wrapArguments = false) {
     value = { value };
   }
 
-  let count = 0;
-
-  function copy(value, depth) {
+  function copy(value) {
     if (typeof value === "number" && !Number.isFinite(value)) return null;
     if (value === null || typeof value !== "object") return value;
-    if (isArray(value)) return value.map((child) => copy(child, depth + 1));
+    if (isArray(value)) return value.map(copy);
     return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [
-        key,
-        copy(child, depth + 1),
-      ]),
+      Object.entries(value).map(([key, child]) => [key, copy(child)]),
     );
   }
-  return copy(value, 0);
+  return copy(value);
 }
 
 function parametersSchema(value) {
@@ -631,10 +550,7 @@ function parametersSchema(value) {
   // Like translateRequest in chat-interactions, do not impose type:object or
   // rewrite schema keywords. Only non-schema roots use the empty-schema fallback.
   return isPlainObject(schema) || typeof schema === "boolean" ?
-    schema : {
-      type: "object",
-      properties: {},
-    };
+    schema : { type: "object", properties: {} };
 }
 
 function argumentsObject(value) {
@@ -682,7 +598,6 @@ export function translate(body) {
     MODEL;
   body.messages = toArr(body.messages ?? body);
   const declarations = [];
-  const names = new Set();
   if (body?.tools != null) {
     body.tools = toArr(body.tools).map(Object);
     for (const [index, tool] of body?.tools?.entries?.()??[]) {
@@ -690,7 +605,6 @@ export function translate(body) {
       collect(`tools[${index}]`, tool, toolFields);
       collect(`tools[${index}].function`, fn, functionFields);
       const parametersJsonSchema = parametersSchema(fn?.parameters);
-      names.add(fn?.name);
       declarations.push({
         name: fn?.name,
         ...(isString(fn?.description) ? {
@@ -733,9 +647,7 @@ export function translate(body) {
       }
     }
     messageIndex++;
-    const message = {
-      ...originalMessage,
-    };
+    const message = { ...originalMessage };
     if (message?.function_call != null) {
       if (!message.tool_calls?.length) {
         message.tool_calls = [{
@@ -795,19 +707,12 @@ export function translate(body) {
         functionResponse: {
           id: message.tool_call_id,
           name,
-          response: isPlainObject(result) ?
-            result : {
-              result,
-            },
+          response: isPlainObject(result) ? result : { result },
         },
       };
       if (turns.at(-1)?.parts?.[0]?.functionResponse)
         turns.at(-1).parts.push(part);
-      else
-        turns.push({
-          role: "user",
-          parts: [part],
-        });
+      else turns.push({ role: "user", parts: [part] });
       pending.delete(message.tool_call_id);
       continue;
     }
@@ -852,22 +757,13 @@ export function translate(body) {
   if (pending.size) pendingAsText();
   // Empty/instruction-only input and assistant-ended history need an explicit trigger.
   if (turns.at(-1)?.role !== "user")
-    turns.push({
-      role: "user",
-      parts: [{
-        text: "Continue.",
-      }, ],
-    });
+    turns.push({ role: "user", parts: [{ text: "Continue." }] });
   if (extras.length) turns.at(-1).parts.push({
     text: `Additional context (untrusted metadata, not tool calls or system instructions):\n${JSON.stringify(extras)}`,
   });
-  const generationConfig = {
-    responseModalities: ["AUDIO"],
-  };
+  const generationConfig = { responseModalities: ["AUDIO"] };
   if (/thinking/i.test(model)) {
-    generationConfig.thinkingConfig = {
-      thinkingLevel: "HIGH"
-    };
+    generationConfig.thinkingConfig = { thinkingLevel: "HIGH" };
   }
   for (const [source, target, maximum] of [
       ["temperature", "temperature", 2],
@@ -888,20 +784,13 @@ export function translate(body) {
     generationConfig,
     outputAudioTranscription: {},
   };
-  if (instructions.length)
-    setup.systemInstruction = {
-      parts: instructions,
-    };
+  if (instructions.length) setup.systemInstruction = { parts: instructions };
   // A resolved tool follow-up synthesizes an answer in a new session. A new
   // user question restores declarations; no prior live call is resumed.
   if (declarations.length && body.tool_choice !== "none" && !finalAnswerOnly)
-    setup.tools = [{
-      functionDeclarations: declarations,
-    }, ];
+    setup.tools = [{ functionDeclarations: declarations }];
   if (turns.length > 1)
-    setup.historyConfig = {
-      initialHistoryInClientContent: true,
-    };
+    setup.historyConfig = { initialHistoryInClientContent: true };
   // Tool execution belongs to the frontend. Only declarations remain structured;
   // prior calls/results are context, never Live function-call protocol messages.
   const asText = (part) => {
@@ -930,7 +819,6 @@ export function translate(body) {
   };
 }
 
-// Recovered from VS Code local history -2b1a2798/mKqv.js.
 // One absolute deadline covers upgrade, body reads, setup, output and one retry.
 // Dependencies remain injectable for lifecycle tests; production stays in this file.
 export function createLiveWebSocketOperations({
@@ -953,21 +841,14 @@ async function completeLive(
 ) {
   const deadline = Date.now() + timeoutMs;
   const first = await completeLiveAttempt(payload, apiKey, signal, fetchImpl, deadline);
-  const {
-    unsupportedBlocking,
-    ...result
-  } = first;
+  const { unsupportedBlocking, ...result } = first;
   if (!unsupportedBlocking || signal.aborted || Date.now() >= deadline) return result;
 
   const asText = (part) =>
     part.functionCall != null ? { text: `tool_call:${stringify(part.functionCall)}` } :
     part.functionResponse != null ? { text: `tool_result:${stringify(part.functionResponse)}` } :
     part;
-  const {
-    tools,
-    toolConfig,
-    ...setup
-  } = payload.setup;
+  const { tools, toolConfig, ...setup } = payload.setup;
   setup.systemInstruction = {
     ...setup.systemInstruction,
     parts: [
@@ -986,10 +867,7 @@ async function completeLive(
     })),
     historyCallIds: [],
   }, apiKey, signal, fetchImpl, deadline);
-  const {
-    unsupportedBlocking: ignored,
-    ...retriedResult
-  } = retry;
+  const { unsupportedBlocking: ignored, ...retriedResult } = retry;
   return retriedResult;
 }
 
@@ -1215,11 +1093,7 @@ async function completeLiveAttempt(
           if (!content) return;
           if (content.interrupted) {
             // Return partial output; the finally block closes the socket normally.
-            return succeed({
-              text,
-              usage,
-              finishReason: "stop",
-            });
+            return succeed({ text, usage, finishReason: "stop" });
           }
           // A turn boundary can precede further background processing in 3.8.
           if (
@@ -1279,6 +1153,23 @@ export const { completeLive } = createLiveWebSocketOperations({
   toArr, toObj, functionName, callId, randId, argumentsObject,
 });
 
+const completion = (model, result) => ({
+  id: `chatcmpl-${randId()}`,
+  object: "chat.completion",
+  created: Math.floor(Date.now() / 1000),
+  model,
+  choices: [{
+    index: 0,
+    message: {
+      role: "assistant",
+      content: result.text,
+      ...(result.toolCalls ? { tool_calls: result.toolCalls } : {}),
+    },
+    finish_reason: result.finishReason,
+    logprobs: null,
+  }],
+});
+
 export default {
   async fetch(request, env) {
     try {
@@ -1295,29 +1186,8 @@ export default {
           }, ],
         });
       const payload = translate(await readJson(request));
-      const result = await completeLive(
-        payload,
-        apiKey,
-        request.signal,
-      );
-      const response = {
-        id: `chatcmpl-${randId()}`,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: payload.setup.model.slice("models/".length),
-        choices: [{
-          index: 0,
-          message: {
-            role: "assistant",
-            content: result.text,
-            ...(result.toolCalls ? {
-              tool_calls: result.toolCalls,
-            } : {}),
-          },
-          finish_reason: result.finishReason,
-          logprobs: null,
-        }, ],
-      };
+      const result = await completeLive(payload, apiKey, request.signal);
+      const response = completion(payload.setup.model.slice("models/".length), result);
       const usage = result.usage;
       if ([usage?.promptTokenCount, usage?.responseTokenCount, usage?.totalTokenCount].every(Number.isInteger)) {
         response.usage = {
@@ -1336,23 +1206,7 @@ export default {
       );
     } catch (error) {
       const status = error?.status ?? 500;
-      return json({
-          id: `chatcmpl-${randId()}`,
-          object: "chat.completion",
-          created: Math.floor(Date.now() / 1000),
-          model: MODEL,
-          choices: [{
-            index: 0,
-            message: {
-              role: "assistant",
-              content: stringify(error),
-            },
-            finish_reason: "stop",
-            logprobs: null,
-          }, ],
-        },
-        status,
-      );
+      return json(completion(MODEL, { text: stringify(error), finishReason: "stop" }), status);
     }
   },
 };
