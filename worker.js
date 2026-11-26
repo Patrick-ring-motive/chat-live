@@ -111,7 +111,7 @@ const stringify = (value) => {
   }
 };
 
-function parseTruncatedJSON(text) {
+function _parseTruncatedJSON(text) {
   text = stringify(text);
 
   const backslash = String.fromCharCode(92);
@@ -331,6 +331,32 @@ function parseTruncatedJSON(text) {
       attach(readScalar());
     }
   }
+}
+
+function parseTruncatedJSON(text) {
+  text = stringify(text);
+  const json = parseTruncatedJSON(text);
+  if(isArray(json) && !text.trim().startsWith('[')){
+    let obj = {};
+    if(json.some(isArray)){
+      obj = [];
+    }
+    for(const x of json){
+      if(isArray(x)){
+        for(const y of x){
+          obj.push(y);
+        }
+      }else if(isObject(x)){
+        for(const key in x){
+          obj[key] = x[key];
+        }
+      }else{
+        obj[x] = obj[x] ?? x;
+      }
+    }
+    return obj;
+  }
+  return json;
 }
 
 const Q = (fn) => {
