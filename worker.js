@@ -580,20 +580,6 @@ const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !isArray(value);
 const functionName = (value) => isString(value) && value.trim().length > 0;
 const callId = functionName;
-// Bound even ignored metadata without recursion or forwarding it upstream.
-function bodyDepth(value) {
-  const stack = [
-    [value, 0]
-  ];
-  while (stack.length) {
-    const [node, depth] = stack.pop();
-    if (node && typeof node === "object") {
-      for (const child of Object.values(node)) {
-        stack.push([child, depth + 1]);
-      }
-    }
-  }
-}
 
 function textParts(content) {
   if (content == null) return [];
@@ -666,7 +652,6 @@ function argumentsObject(value) {
 
 export function translate(body) {
   body = Object(body);
-  bodyDepth(body);
   const model = isString(body.model) ?
     body.model.trim().replace(/^models\//, "") || MODEL :
     MODEL;
