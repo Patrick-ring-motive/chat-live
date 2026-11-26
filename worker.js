@@ -958,7 +958,7 @@ export default {
         response.upstream_status = status;
       return json(
         response,
-        response.upstream_status  ??= 502,
+        response.upstream_status === undefined ? status : 502,
       );
     } catch (error) {
       const status = error?.status ?? 500;
