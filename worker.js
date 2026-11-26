@@ -111,6 +111,29 @@ const stringify = (value) => {
   }
 };
 
+const decoder = new TextDecoder();
+const _decode = decoder.decode.bind(decoder);
+const decode = bytes =>{
+  try{
+    return _decode(bytes);
+  }catch{}
+  try{
+    return _decode(new Uint8Array(bytes));
+  }catch{}
+  return stringify(bytes);
+};
+
+const encoder = new TextEncoder();
+const _encode = encoder.encode.bind(encoder);
+const encode = text =>{
+  try{
+    if(!isString(text)){
+      return new Uint8Array(text);
+    }
+  }catch{}
+  return _encode(stringify(text));
+};
+
 function _parseTruncatedJSON(text) {
   text = stringify(text);
 
@@ -365,8 +388,9 @@ const Q = (fn) => {
   } catch {}
 };
 
-const encoder = new TextEncoder();
-const encode = encoder.encode.bind(encoder);
+
+
+
 
 const safeStatusText = (value) =>
   Q(() => {
@@ -463,8 +487,6 @@ async function $bytes(res) {
   return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }
 
-const decoder = new TextDecoder();
-const decode = decoder.decode.bind(decoder);
 
 async function $text(res) {
   try {
