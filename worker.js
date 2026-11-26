@@ -579,9 +579,7 @@ class ApiError extends Error {
     this.param = param;
   }
 }
-const invalid = (message, param) => {
-  throw new ApiError(400, message, param);
-};
+
 const json = (value, status = 200) =>
   Response.json(value, {
     status,
@@ -930,17 +928,15 @@ export async function completeLive(
   payload,
   apiKey,
   signal,
-  timeoutMs = 180000,
+  _unusedTimeoutMs = undefined, // Retained for existing callers passing fetchImpl fifth.
   fetchImpl = fetchResponse,
 ) {
-  const started = Date.now();
-  const first = await completeLiveAttempt(payload, apiKey, signal, timeoutMs, fetchImpl);
+  const first = await completeLiveAttempt(payload, apiKey, signal, fetchImpl);
   const {
     unsupportedBlocking,
     ...result
   } = first;
-  const remaining = timeoutMs - (Date.now() - started);
-  if (!unsupportedBlocking || signal.aborted || remaining <= 0) return result;
+  if (!unsupportedBlocking || signal.aborted) return result;
 
   const asText = (part) => {
     if (part.functionCall != null) return {
@@ -973,7 +969,7 @@ export async function completeLive(
       parts: turn.parts.map(asText)
     })),
     historyCallIds: [],
-  }, apiKey, signal, remaining, fetchImpl);
+  }, apiKey, signal, fetchImpl);
   const {
     unsupportedBlocking: ignored,
     ...retriedResult
@@ -985,12 +981,10 @@ async function completeLiveAttempt(
   payload,
   apiKey,
   signal,
-  timeoutMs,
   fetchImpl,
 ) {
   const controller = new AbortController();
   let socket;
-  let timer;
   let onAbort;
   let text = "";
   let usage;
@@ -998,9 +992,9 @@ async function completeLiveAttempt(
   const partialResult = (error) => ({
     text: text.trim() ?
       text : availableText.trim() ?
-      availableText : `error:${stringify(error instanceof Error ? String(error) : error)}`,
+      availableText : `error:${stringify(error)}`,
     usage,
-    status: error instanceof ApiError ? error.status : 502,
+    status: error.status || 502,
     finishReason: "stop",
   });
   let resolvePending;
@@ -1013,14 +1007,10 @@ async function completeLiveAttempt(
     resolvePending(result);
     controller.abort();
   };
-  onAbort = () => abort(new ApiError(499, "Client disconnected."));
+  onAbort = (event) => abort(new ApiError(499, stringify(event)));
   signal.addEventListener("abort", onAbort, {
     once: true,
   });
-  timer = setTimeout(
-    () => abort(new ApiError(504, "Gemini Live request timed out.")),
-    timeoutMs,
-  );
   const work = async () => {
     const response = await fetchImpl(ENDPOINT, {
       headers: {
@@ -1256,7 +1246,6 @@ async function completeLiveAttempt(
   } catch (error) {
     return partialResult(error);
   } finally {
-    clearTimeout(timer);
     signal.removeEventListener("abort", onAbort);
     controller.abort();
     if (socket) {
@@ -1285,12 +1274,10 @@ export default {
           }, ],
         });
       const payload = translate(await readJson(request));
-      const timeout = Number(env.TIMEOUT_MS || 180000);
       const result = await completeLive(
         payload,
         apiKey,
         request.signal,
-        timeout,
       );
       const response = {
         id: `chatcmpl-${randId()}`,
