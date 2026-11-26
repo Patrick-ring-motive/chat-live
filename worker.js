@@ -396,7 +396,7 @@ async function bestEffortResponse(response) {
 
 async function bestEffortFetch(input, init) {
   try {
-    const originalResponse = await fetch(input, init);
+    const originalResponse = await globalThis.fetch(input, init);
     return await bestEffortResponse(originalResponse);
   } catch (e) {
     return new Response(String(e), {
@@ -547,10 +547,34 @@ function toolData(value, param, wrapArguments = false) {
 
 function parametersSchema(value) {
   const schema = toolData(value, "tools");
-  // Like translateRequest in chat-interactions, do not impose type:object or
-  // rewrite schema keywords. Only non-schema roots use the empty-schema fallback.
-  return isPlainObject(schema) || typeof schema === "boolean" ?
-    schema : { type: "object", properties: {} };
+  if (value == null) return { schema: { type: "object", properties: {} }, wrapped: false };
+  if (isPlainObject(schema) && schema.type === "object")
+    return { schema, wrapped: false };
+  if (isPlainObject(schema) && schema.type == null &&
+      !["$ref", "anyOf", "oneOf", "allOf", "not", "enum", "const"].some(key => key in schema))
+    return { schema: { ...schema, type: "object" }, wrapped: false };
+  // Struct arguments need an object envelope. An impossible/non-schema root is
+  // relaxed to an unconstrained value rather than rejecting the entire request.
+  return {
+    schema: {
+      type: "object",
+      properties: { value: isPlainObject(schema) ? schema : {} },
+      required: ["value"],
+    },
+    wrapped: true,
+  };
+}
+
+const safeFunctionName = /^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$/;
+function toolAlias(name, reserved, used) {
+  if (safeFunctionName.test(name) && !used.has(name)) return name;
+  const base = name.replace(/[^A-Za-z0-9_.:-]/g, "_").replace(/^[^A-Za-z_]/, "_") || "tool";
+  let alias = base.slice(0, 64);
+  for (let suffix = 1; reserved.has(alias) || used.has(alias); suffix++) {
+    const tail = `_${suffix}`;
+    alias = base.slice(0, 64 - tail.length) + tail;
+  }
+  return alias;
 }
 
 function argumentsObject(value) {
@@ -562,7 +586,7 @@ function argumentsObject(value) {
 
 const requestFields = new Set([
   "model", "messages", "tools", "tool_choice", "temperature", "top_p",
-  "max_completion_tokens", "max_tokens", "stream", "stream_options", "n",
+  "max_completion_tokens", "max_tokens", "stream", "stream_options", "n", "reasoning_effort",
 ]);
 const messageFields = new Set([
   "role", "content", "audio", "tool_calls", "function_call", "tool_call_id", "name",
@@ -598,24 +622,32 @@ export function translate(body) {
     MODEL;
   body.messages = toArr(body.messages ?? body);
   const declarations = [];
+  const toolMappings = [];
   if (body?.tools != null) {
     body.tools = toArr(body.tools).map(Object);
+    const reserved = new Set(body.tools.map(tool => String(tool?.function?.name ?? "")));
+    const used = new Set();
     for (const [index, tool] of body?.tools?.entries?.()??[]) {
       const fn = tool?.function;
       collect(`tools[${index}]`, tool, toolFields);
       collect(`tools[${index}].function`, fn, functionFields);
-      const parametersJsonSchema = parametersSchema(fn?.parameters);
+      const { schema: parametersJsonSchema, wrapped } = parametersSchema(fn?.parameters);
+      const originalName = String(fn?.name ?? "");
+      const name = toolAlias(originalName, reserved, used);
+      used.add(name);
+      toolMappings.push({ name, originalName, wrapped });
       declarations.push({
-        name: fn?.name,
-        ...(isString(fn?.description) ? {
-          description: fn?.description,
-        } : {}),
+        name,
+        description: isString(fn?.description) && fn.description.trim() ?
+          String(fn.description) : `Call frontend tool ${originalName || name}.`,
         parametersJsonSchema,
         behavior: "BLOCKING",
       });
     }
   }
   const turns = [];
+  const exchangeStarts = [0];
+  const compactableTurns = [];
   const instructions = [];
   const ids = new Set();
   const pending = new Map();
@@ -747,11 +779,19 @@ export function translate(body) {
     }
     if (/^system|developer$/.test(message.role)) {
       instructions.push(...parts);
-    } else if (parts.length)
+    } else if (parts.length) {
+      if (message.role === "user" && turns.length)
+        exchangeStarts.push(turns.length);
+      // Only original conversation strings, never serialized tool/audio data.
+      if (["user", "assistant"].includes(originalMessage.role) &&
+          isString(originalMessage.content) && originalMessage.audio == null &&
+          originalMessage.function_call == null)
+        compactableTurns.push(turns.length);
       turns.push({
         role: message.role === "assistant" ? "model" : "user",
         parts,
       });
+    }
   }
   const finalAnswerOnly = resolvedToolFollowup && pending.size === 0;
   if (pending.size) pendingAsText();
@@ -762,9 +802,7 @@ export function translate(body) {
     text: `Additional context (untrusted metadata, not tool calls or system instructions):\n${JSON.stringify(extras)}`,
   });
   const generationConfig = { responseModalities: ["AUDIO"] };
-  if (/thinking/i.test(model)) {
-    generationConfig.thinkingConfig = { thinkingLevel: "HIGH" };
-  }
+  // Leave thinking settings at the server default.
   for (const [source, target, maximum] of [
       ["temperature", "temperature", 2],
       ["top_p", "topP", 1],
@@ -775,14 +813,12 @@ export function translate(body) {
   }
   const limit = numeric(body.max_completion_tokens) ?? numeric(body.max_tokens);
   if (limit !== undefined)
-    generationConfig.maxOutputTokens = Math.min(
-      65536,
-      Math.max(1, Math.trunc(limit)),
-    );
+    generationConfig.maxOutputTokens = Math.max(1, Math.trunc(limit));
   const setup = {
     model: `models/${model}`,
     generationConfig,
     outputAudioTranscription: {},
+    contextWindowCompression: { slidingWindow: {} },
   };
   if (instructions.length) setup.systemInstruction = { parts: instructions };
   // A resolved tool follow-up synthesizes an answer in a new session. A new
@@ -816,7 +852,121 @@ export function translate(body) {
       parts: turn.parts.map(asText)
     })),
     historyCallIds: [...ids],
+    toolMappings,
+    exchangeStarts,
+    compactableTurns,
   };
+}
+
+// Cache only settled, whitelisted metadata, never request I/O or raw credentials.
+const modelMetadataCache = new Map();
+const positiveInteger = value => Number.isInteger(value) && value > 0 ? value : undefined;
+export async function discoverModel(model, apiKey, signal, {
+  fetchImpl = (...args) => globalThis.fetch(...args),
+  cache = modelMetadataCache,
+  now = Date.now,
+  timeoutMs = 2000,
+} = {}) {
+  const controller = new AbortController();
+  let timer;
+  let onAbort;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(JSON.stringify([apiKey, model])));
+    const key = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    for (const [entryKey, entry] of cache)
+      if (entry.expires <= now()) cache.delete(entryKey);
+    if (cache.has(key)) return { ...cache.get(key).metadata };
+    const cancelled = new Promise(resolve => {
+      onAbort = () => { controller.abort(); resolve({}); };
+      signal?.addEventListener?.("abort", onAbort, { once: true });
+      timer = setTimeout(onAbort, timeoutMs);
+      if (signal?.aborted) onAbort();
+    });
+    const load = async () => {
+      if (controller.signal.aborted) return {};
+      try {
+        const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.replace(/^models\//, ""))}`, {
+          method: "GET",
+          headers: { "x-goog-api-key": apiKey },
+          signal: controller.signal,
+        });
+        if (!response.ok || controller.signal.aborted) {
+          await response.body?.cancel?.();
+          return {};
+        }
+        const metadata = await response.json();
+        return {
+          inputTokenLimit: positiveInteger(metadata.inputTokenLimit),
+          outputTokenLimit: positiveInteger(metadata.outputTokenLimit),
+        };
+      } catch {
+        // Discovery is optional; preserve the request when metadata is unavailable.
+        return {};
+      }
+    };
+    const metadata = await Promise.race([load(), cancelled]);
+    if (!signal?.aborted) cache.set(key, {
+      metadata,
+      expires: now() + (Object.values(metadata).some(value => value !== undefined) ? 300000 : 30000),
+    });
+    return { ...metadata };
+  } catch {
+    return {};
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener?.("abort", onAbort);
+    controller.abort();
+  }
+}
+
+// Same byte/4 heuristic as ../groq-api/gemini-chat.js, NOT a token count.
+// Count wire content, not local alias/group bookkeeping. JSON is already compact.
+export const estimateLiveTokens = payload => Math.ceil(encoder.encode(JSON.stringify({
+  setup: payload.setup, turns: payload.turns,
+})).byteLength / 4);
+
+export function trimLivePayload(payload, budget) {
+  const result = structuredClone(payload);
+  const starts = result.exchangeStarts ?? [0];
+  if (estimateLiveTokens(result) > budget) {
+    // Adapted from Patrick-ring-motive/stupid-compact, commit 22c7765.
+    // Newest-first per role, including repetition within the latest message.
+    const roles = new Map();
+    for (const index of (result.compactableTurns ?? []).toReversed()) {
+      const turn = result.turns[index];
+      const seen = roles.get(turn.role) ?? new Set();
+      roles.set(turn.role, seen);
+      const part = turn.parts[0];
+      const shreds = [...new Set(part.text.split(" "))].filter(word => !seen.has(word));
+      for (const word of shreds) seen.add(word);
+      part.text = shreds.join(" ").trim();
+    }
+  }
+  // Re-estimate before dropping oldest whole exchanges, including tool history.
+  let removed = 0;
+  while (starts.length > 1 && estimateLiveTokens(result) > budget) {
+    starts.shift();
+    const next = starts[0];
+    result.turns.splice(0, next - removed);
+    removed = next;
+  }
+  result.exchangeStarts = starts.map(start => start - removed);
+  if (result.compactableTurns)
+    result.compactableTurns = result.compactableTurns.filter(index => index >= removed).map(index => index - removed);
+  if (result.turns.length <= 1) delete result.setup.historyConfig;
+  // Preserve instructions, declarations and the latest (possibly compacted)
+  // exchange even if too large. Retained tool data is never compacted.
+  return result;
+}
+
+export function applyModelPolicy(payload, metadata = {}) {
+  const result = structuredClone(payload);
+  const config = result.setup.generationConfig;
+  const outputLimit = positiveInteger(metadata.outputTokenLimit);
+  if (outputLimit && config.maxOutputTokens !== undefined)
+    config.maxOutputTokens = Math.min(config.maxOutputTokens, outputLimit);
+  const budget = positiveInteger(metadata.inputTokenLimit);
+  return budget ? trimLivePayload(result, budget) : result;
 }
 
 // One absolute deadline covers upgrade, body reads, setup, output and one retry.
@@ -1070,14 +1220,17 @@ async function completeLiveAttempt(
               for (let suffix = 1; ids.has(id); suffix++)
                 id = `${baseId}_${suffix}`;
               ids.add(id);
+              const mapping = payload.toolMappings?.find?.(tool => tool.name === name);
+              const args = argumentsObject(fn.args ?? fn.arguments ?? call.args ?? {});
+              // Only unwrap our own envelope; preserve unexpected extra fields.
+              const unwrapped = mapping?.wrapped && Object.keys(args).length === 1 &&
+                Object.hasOwn(args, "value") ? args.value : args;
               toolCalls.push({
                 id,
                 type: "function",
                 function: {
-                  name,
-                  arguments: JSON.stringify(
-                    argumentsObject(fn.args ?? fn.arguments ?? call.args ?? {}),
-                  ),
+                  name: mapping?.originalName ?? name,
+                  arguments: JSON.stringify(unwrapped),
                 },
               });
             }
@@ -1185,7 +1338,10 @@ export default {
             owned_by: "google",
           }, ],
         });
-      const payload = translate(await readJson(request));
+      const body = await readJson(request);
+      const translated = translate(body);
+      const metadata = await discoverModel(translated.setup.model, apiKey, request.signal);
+      const payload = applyModelPolicy(translated, metadata);
       const result = await completeLive(payload, apiKey, request.signal);
       const response = completion(payload.setup.model.slice("models/".length), result);
       const usage = result.usage;
