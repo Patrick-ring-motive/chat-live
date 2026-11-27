@@ -1,5 +1,7 @@
 # Chat Completions to Gemini Live
 
+https://chat-live.gemini-responses.workers.dev/
+
 Cloudflare module Worker exposing `POST /v1/chat/completions` and `GET /v1/models`. Uses one AI Studio Live WebSocket session per request and returns one nonstream JSON completion. Requests audio output with output transcription, discards PCM audio chunks, and returns only the transcript. No audio reaches the client. Supports client-executed function tools; no Worker function execution, extended thinking, session reuse, or automatic retries. Audio generation and transfer still incur latency and applicable charges.
 
 ## Configuration
